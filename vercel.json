@@ -3,7 +3,8 @@
   "builds": [
     {
       "src": "app.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": { "runtime": "python3.9" }
     }
   ],
   "routes": [
@@ -13,6 +14,10 @@
     }
   ],
   "env": {
-    "FLASK_ENV": "production"
+    "FLASK_ENV": "production",
+    "BOT_TOKEN": "@bot_token",
+    "EMAIL_ADDRESS": "@email_address",
+    "EMAIL_PASSWORD": "@email_password",
+    "DEBUG": "@debug"
   }
 }
