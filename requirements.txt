@@ -1,9 +1,5 @@
+Flask==2.3.3
 python-telegram-bot==20.3
-Flask==2.3.2
-scikit-learn==1.2.2
-nltk==3.8.1
-python-docx==0.8.11
-PyMuPDF==1.22.3
-selenium==4.9.1
-webdriver_manager==3.8.6
-numpy==1.23.5
+requests==2.31.0
+beautifulsoup4==4.12.2
+python-dotenv==1.0.0
