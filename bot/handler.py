@@ -5,7 +5,7 @@ from bot.utils import (start, ask_question, liste_questions, send_cv, my_id,
 from config import BOT_TOKEN
 
 
-bot_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+bot_app = Application.builder().token(BOT_TOKEN).build()
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CommandHandler("question", ask_question))
