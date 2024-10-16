@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram Bot Token
-BOT_TOKEN = os.getenv('BOT_TOKEN')
+BOT_TOKEN = "7495077361:AAGFA9GN6MCoUjNmiWDEUwa7IvN8C7E1dR0"
 
 # Email configuration
 EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
