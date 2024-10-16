@@ -476,7 +476,7 @@
 #     bot_app.bot.set_webhook(url=WEBHOOK_URL)
 #     app.run(host='0.0.0.0', port=PORT)
 import asyncio
-import requests
+import aiohttp  # Use aiohttp for async HTTP requests
 from flask import Flask, request
 from telegram import Update
 from bot.handler import bot_app
@@ -501,19 +501,20 @@ def index():
     return 'Hello, World!'
 
 async def set_webhook():
-    result = await bot_app.bot.set_webhook(url=WEBHOOK_URL)
+    await bot_app.bot.set_webhook(url=WEBHOOK_URL)
     print(f"Webhook set to: {WEBHOOK_URL}")
-    print(f"Webhook setup result: {result}")
 
-def run_set_webhook():
-    asyncio.run(set_webhook())
-
-def check_bot():
+async def check_bot():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
-    response = requests.get(url)
-    print(f"Bot check response: {response.json()}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.json()
+            print(f"Bot check response: {data}")
 
 if __name__ == '__main__':
-    check_bot()
-    run_set_webhook()
-    app.run(host='0.0.0.0', port=PORT)
+    # Run the webhook setup
+    asyncio.run(check_bot())
+    asyncio.run(set_webhook())
+    # Use Uvicorn to run the app
+    import uvicorn
+    uvicorn.run(app, host='0.0.0.0', port=PORT)
