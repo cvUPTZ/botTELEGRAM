@@ -22,7 +22,6 @@ def main() -> None:
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
     application.add_handler(CommandHandler("tagall", tag_all))
-    application.add_handler(CommandHandler("offremploi", offremploi))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
