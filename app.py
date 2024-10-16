@@ -475,21 +475,23 @@
 # def main():
 #     bot_app.bot.set_webhook(url=WEBHOOK_URL)
 #     app.run(host='0.0.0.0', port=PORT)
+
+
+
 import asyncio
 import requests
-from flask import Flask, request
+from quart import Quart, request
 from telegram import Update
 from bot.handler import bot_app
 from config import PORT, WEBHOOK_URL, BOT_TOKEN
-from asgiref.wsgi import WsgiToAsgi
 
-app = Flask(__name__)
+app = Quart(__name__)
 
 @app.route('/webhook', methods=['POST'])
 async def webhook():
     try:
         print("Webhook received!")
-        update = Update.de_json(request.get_json(force=True), bot_app.bot)
+        update = Update.de_json(await request.get_json(force=True), bot_app.bot)
         print(f"Update received: {update}")
         await bot_app.process_update(update)
         return 'OK'
@@ -498,7 +500,7 @@ async def webhook():
         return 'Error', 500
 
 @app.route('/')
-def index():
+async def index():
     return 'Hello, World!'
 
 async def set_webhook():
@@ -517,9 +519,4 @@ def check_bot():
 if __name__ == '__main__':
     check_bot()
     run_set_webhook()
-
-    # Wrap Flask app in WsgiToAsgi to make it ASGI-compatible
-    asgi_app = WsgiToAsgi(app)
-    import uvicorn
-    uvicorn.run(asgi_app, host='0.0.0.0', port=PORT)
-
+    app.run(host='0.0.0.0', port=PORT)
