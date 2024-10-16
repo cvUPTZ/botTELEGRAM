@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN, WEBHOOK_URL, PORT
 from bot.handler import (
     start, ask_question, liste_questions, send_cv, my_id, 
-    tag_all, welcome_new_member, offremploi, handle_message
+    tag_all, welcome_new_member,  handle_message
 )
 
 logging.basicConfig(
