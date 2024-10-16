@@ -5,7 +5,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-PORT = int(os.getenv('PORT', 8443))
+PORT = int(os.getenv('PORT', 4000))
 EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 SMTP_SERVER = os.getenv('SMTP_SERVER')
