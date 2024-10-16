@@ -1,5 +1,5 @@
-import asyncio
 import logging
+import asyncio
 import requests
 from quart import Quart, request
 from telegram import Update
