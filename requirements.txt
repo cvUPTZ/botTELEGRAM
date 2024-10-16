@@ -2,7 +2,7 @@ python-telegram-bot==20.3
 requests==2.31.0
 beautifulsoup4==4.12.2
 python-dotenv==1.0.0
-Flask[async]==3.1.2         # Flask version with async support
+Flask[async]==2.3.3         # Flask version with async support
 gunicorn==21.2.0            # Gunicorn for production deployment
 uvicorn==0.23.0             # Uvicorn ASGI server
 aiohttp==3.8.5              # Async HTTP client library
