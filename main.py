@@ -27,11 +27,16 @@ def main() -> None:
         application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        # Start the bot in polling mode
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Start the bot in polling mode with graceful shutdown handling
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            stop_signals=None,
+            on_startup=None,
+            on_shutdown=None,
+        )
         logger.info("Bot started successfully in polling mode")
     except Exception as e:
-        logger.error(f"Error starting bot: {str(e)}")
+        logger.error("Error starting bot", exc_info=True)
 
 if __name__ == '__main__':
     main()
