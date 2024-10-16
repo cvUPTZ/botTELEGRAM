@@ -480,7 +480,7 @@
 #     main()
 from flask import Flask, request
 from telegram import Update
-from bot.handlers import bot_app  # Change this line
+from bot.handler import bot_app  # Change this line
 from config import PORT, WEBHOOK_URL
 
 app = Flask(__name__)
