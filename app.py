@@ -478,11 +478,9 @@
 
 # if __name__ == '__main__':
 #     main()
-
-# app.py
 from flask import Flask, request
 from telegram import Update
-from bot.handler import bot_app
+from bot.handlers import bot_app  # Change this line
 from config import PORT, WEBHOOK_URL
 
 app = Flask(__name__)
