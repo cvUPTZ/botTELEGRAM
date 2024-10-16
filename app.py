@@ -1,70 +1,38 @@
-import asyncio
-import requests
-from quart import Quart, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler
-from telegram.error import RetryAfter
-from config import PORT, WEBHOOK_URL, BOT_TOKEN
+import logging
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from config import BOT_TOKEN, WEBHOOK_URL, PORT
+from bot.handlers import (
+    start, ask_question, liste_questions, send_cv, my_id, 
+    tag_all, welcome_new_member, offremploi, handle_message
+)
 
-app = Quart(__name__)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Initialize the Application
-bot_app = Application.builder().token(BOT_TOKEN).build()
+def main() -> None:
+    application = Application.builder().token(BOT_TOKEN).build()
 
-async def start(update, context):
-    await update.message.reply_text('Hello! I am your bot.')
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("question", ask_question))
+    application.add_handler(CommandHandler("liste_questions", liste_questions))
+    application.add_handler(CommandHandler("sendcv", send_cv))
+    application.add_handler(CommandHandler("myid", my_id))
+    application.add_handler(CommandHandler("tagall", tag_all))
+    application.add_handler(CommandHandler("offremploi", offremploi))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-bot_app.add_handler(CommandHandler("start", start))
-
-@app.route('/webhook', methods=['POST'])
-async def webhook():
-    try:
-        print("Webhook received!")
-        json_data = await request.get_json(force=True)
-        update = Update.de_json(json_data, bot_app.bot)
-        print(f"Update received: {update}")
-        await bot_app.process_update(update)
-        return 'OK'
-    except Exception as e:
-        print(f"Error in webhook: {str(e)}")
-        return 'Error', 500
-
-@app.route('/')
-async def index():
-    return 'Hello, World!'
-
-async def set_webhook_with_retry(max_retries=5, initial_delay=1):
-    for attempt in range(max_retries):
-        try:
-            result = await bot_app.bot.set_webhook(url=WEBHOOK_URL)
-            print(f"Webhook set to: {WEBHOOK_URL}")
-            print(f"Webhook setup result: {result}")
-            return
-        except RetryAfter as e:
-            if attempt < max_retries - 1:
-                delay = e.retry_after if hasattr(e, 'retry_after') else initial_delay * (2 ** attempt)
-                print(f"Retry after {delay} seconds (attempt {attempt + 1}/{max_retries})")
-                await asyncio.sleep(delay)
-            else:
-                print(f"Failed to set webhook after {max_retries} attempts")
-                raise
-
-@app.before_serving
-async def startup():
-    await set_webhook_with_retry()
-    await bot_app.initialize()
-    await bot_app.start()
-
-@app.after_serving
-async def shutdown():
-    await bot_app.stop()
-    await bot_app.shutdown()
-
-def check_bot():
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
-    response = requests.get(url)
-    print(f"Bot check response: {response.json()}")
+    # Set up webhook
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
+    )
 
 if __name__ == '__main__':
-    check_bot()
-    app.run(host='0.0.0.0', port=PORT)
+    main()
