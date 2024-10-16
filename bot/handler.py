@@ -2,7 +2,7 @@
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from bot.utils import (start, ask_question, liste_questions, send_cv, my_id,
                        handle_message, tag_all, start_p, help_command, welcome_new_member, offremploi)
-from config import TELEGRAM_BOT_TOKEN
+from config import BOT_TOKEN
 from bot.scraper import admin_scrape
 from models.cv_analyzer import analyze_cv
 
