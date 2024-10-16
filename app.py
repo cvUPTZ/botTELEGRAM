@@ -25,14 +25,19 @@ app.add_handler(CommandHandler("tagall", tag_all))
 app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Set up webhook
-app.run_webhook(
-    listen="0.0.0.0",
-    port=PORT,
-    url_path=BOT_TOKEN,
-    webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
-)
+def main():
+    # Check if using webhook
+    if WEBHOOK_URL:
+        # Set up webhook
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=BOT_TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
+        )
+    else:
+        # Run polling if webhook is not set
+        app.run_polling()
 
-# Export the app variable
 if __name__ == '__main__':
-    app.run_polling()
+    main()
