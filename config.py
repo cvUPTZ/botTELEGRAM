@@ -10,7 +10,9 @@ EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 SMTP_SERVER = os.getenv('SMTP_SERVER')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))  # Default to 587 if not specified
+PORT =  int(os.getenv('PORT', 5000))
 
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 # Other configuration variables
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
