@@ -29,6 +29,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
 
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    track_user(update) 
+
+
 @admin_only
 async def liste_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     questions, _ = load_questions()
