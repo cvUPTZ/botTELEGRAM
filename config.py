@@ -12,7 +12,7 @@ SMTP_SERVER = os.getenv('SMTP_SERVER')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))  # Default to 587 if not specified
 PORT =  int(os.getenv('PORT', 5000))
 
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+WEBHOOK_URL = "https://bottelegram-wouf.onrender.com/webhook"
 # Other configuration variables
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
