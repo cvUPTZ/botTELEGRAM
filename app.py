@@ -2,11 +2,19 @@ import asyncio
 import requests
 from quart import Quart, request
 from telegram import Update
+from telegram.ext import Application, CommandHandler
 from telegram.error import RetryAfter
-from bot.handler import bot_app
 from config import PORT, WEBHOOK_URL, BOT_TOKEN
 
 app = Quart(__name__)
+
+# Initialize the Application
+bot_app = Application.builder().token(BOT_TOKEN).build()
+
+async def start(update, context):
+    await update.message.reply_text('Hello! I am your bot.')
+
+bot_app.add_handler(CommandHandler("start", start))
 
 @app.route('/webhook', methods=['POST'])
 async def webhook():
@@ -44,6 +52,13 @@ async def set_webhook_with_retry(max_retries=5, initial_delay=1):
 @app.before_serving
 async def startup():
     await set_webhook_with_retry()
+    await bot_app.initialize()
+    await bot_app.start()
+
+@app.after_serving
+async def shutdown():
+    await bot_app.stop()
+    await bot_app.shutdown()
 
 def check_bot():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
