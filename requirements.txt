@@ -7,3 +7,4 @@ gunicorn==21.2.0
 uvicorn==0.23.0            # Uvicorn ASGI server
 aiohttp==3.8.5
 asgiref==3.7.2
+Quart==0.18.0 
