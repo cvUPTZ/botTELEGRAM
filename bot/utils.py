@@ -13,25 +13,25 @@ from config import (EMAIL_ADDRESS, EMAIL_PASSWORD, SMTP_SERVER, SMTP_PORT,
                     admin_user_ids)
 
 def load_sent_emails():
-    if os.path.exists(SENT_EMAILS_FILE):
-        with open(SENT_EMAILS_FILE, 'r') as file:
+    if os.path.exists("data/sent_emails.json"):
+        with open("data/sent_emails.json", 'r') as file:
             return json.load(file)
     return {}
 
 def save_sent_emails(sent_emails):
-    with open(SENT_EMAILS_FILE, 'w') as file:
+    with open("data/sent_emails.json", 'w') as file:
         json.dump(sent_emails, file, indent=4)
 
 def load_questions():
-    if os.path.exists(QUESTIONS_FILE):
-        with open(QUESTIONS_FILE, 'r') as file:
+    if os.path.exists("data/questions/json"):
+        with open("data/questions/json", 'r') as file:
             data = json.load(file)
             next_id = max(map(int, data.keys()), default=0) + 1
             return data, next_id
     return {}, 1
 
 def save_questions(questions):
-    with open(QUESTIONS_FILE, 'w') as file:
+    with open("data/questions/json", 'w') as file:
         json.dump(questions, file, indent=4)
 
 def is_admin(update):
