@@ -475,7 +475,6 @@
 # def main():
 #     bot_app.bot.set_webhook(url=WEBHOOK_URL)
 #     app.run(host='0.0.0.0', port=PORT)
-
 import asyncio
 import requests
 from flask import Flask, request
