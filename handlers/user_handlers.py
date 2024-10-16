@@ -39,7 +39,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             '❌ Format de commande incorrect. Utilisez :\n'
             '/sendcv [email] [junior|senior]\n\n'
-            'Exemple : /sendcv email@gmail.com junior'
+            'Exemple : /sendcv email@gmail.com, junior'
         )
         return
 
