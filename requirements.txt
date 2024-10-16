@@ -6,5 +6,5 @@ gunicorn==21.2.0            # Gunicorn for production deployment
 uvicorn==0.23.0             # Uvicorn ASGI server
 aiohttp==3.8.5              # Async HTTP client library
 quart==0.18.3
-#werkzeug==2.2.3
+werkzeug==2.2.0
 python-telegram-bot[webhooks]==20.0
