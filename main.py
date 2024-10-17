@@ -35,7 +35,7 @@ async def hello():
 
 # Configure Hypercorn
 config = Config()
-config.bind = [f"0.0.0.0:{PORT or 3001}"]
+config.bind = [f"0.0.0.0:{PORT or 4000}"]  # Use PORT from environment or default to 4000
 config.use_reloader = False
 config.workers = 1
 
@@ -66,10 +66,10 @@ async def run_telegram_bot():
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
         logger.info("Telegram bot started successfully")
-
-        # Run until the application is stopped
-        await application.updater.stop()
-        await application.stop()
+        
+        # Keep the bot running
+        while True:
+            await asyncio.sleep(1)
 
     except Exception as e:
         logger.error("Error running Telegram bot", exc_info=True)
