@@ -27,7 +27,7 @@ app.layout = html.Div("Hello from Dash!")
 
 # Function to run the Dash server
 def run_dash():
-    app.run_server(debug=True, PORT || 3001, host='0.0.0.0')
+    app.run_server(debug=True, port=PORT or 3001, host='0.0.0.0')
 
 def signal_handler(sig, frame):
     logger.info("Shutting down bot gracefully...")
