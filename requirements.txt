@@ -5,3 +5,5 @@ Flask[async]==3.0.0            # Flask version with async support
 python-telegram-bot[webhooks]==20.0
 dash==2.9.3  # or the latest stable version
 Werkzeug==3.0.0  # version known to work with Dashs
+quart==0.19.4
+hypercorn==0.15.0
