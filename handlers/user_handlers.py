@@ -38,31 +38,37 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    topic_id = 3137
+    if update.effective_message.message_thread_id != topic_id:
+        await update.effective_message.reply_text('🚫 Cette commande est restreinte au topic CV_UP إحصل على نموذج السيرة')
+        return
+    
     if not context.args:
-        await update.message.reply_text(
-            '❌ Format de commande incorrect. Utilisez :\n'
-            '/sendcv [email] [junior|senior]\n\n'
-            'Exemple : /sendcv email@gmail.com junior'
-        )
+        await send_usage_instructions(update.effective_message)
         return
-
-    # Join the arguments into a single string and split using various separators
+    
     input_text = ' '.join(context.args)
-    # Split using multiple separators: spaces, commas, semicolons, colons, pipes, and tabs
     parts = re.split(r'[ ,;:|\t]+', input_text)
-
+    
     if len(parts) != 2:
-        await update.message.reply_text(
-            '❌ Format de commande incorrect. Utilisez :\n'
-            '/sendcv [email] [junior|senior]\n\n'
-            'Exemple : /sendcv email@gmail.com junior'
-        )
+        await send_usage_instructions(update.effective_message)
         return
-
+    
     email, cv_type = parts
+    
+    if cv_type.lower() not in ['junior', 'senior']:
+        await update.effective_message.reply_text('❌ Type de CV invalide. Choisissez "junior" ou "senior".')
+        return
+    
+    result = await send_email_with_cv(email, cv_type.lower())
+    await update.effective_message.reply_text(result)
 
-    result = await send_email_with_cv(email, cv_type)
-    await update.message.reply_text(result)
+async def send_usage_instructions(message):
+    await message.reply_text(
+        '❌ Format de commande incorrect. Utilisez :\n'
+        '/sendcv [email] [junior|senior]\n\n'
+        'Exemple : /sendcv email@gmail.com junior'
+    )
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
