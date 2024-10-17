@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import signal
 import sys
@@ -8,8 +9,9 @@ from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
 from dash import Dash, html
-from flask import Flask
-from threading import Event
+from quart import Quart
+from hypercorn.asyncio import serve
+from hypercorn.config import Config
 
 # Logging configuration
 logging.basicConfig(
@@ -22,19 +24,23 @@ logger = logging.getLogger(__name__)
 dash_app = Dash(__name__)
 dash_app.layout = html.Div("Hello from Dash!")
 
-# Create a Flask server
-server = Flask(__name__)
-
-# Combine Dash and Flask
+# Create a Quart server (asyncio-compatible Flask-like server)
+server = Quart(__name__)
 dash_app.server = server
 
+# Configure Hypercorn
+config = Config()
+config.bind = [f"0.0.0.0:{PORT or 3001}"]
+
 def signal_handler(sig, frame):
-    logger.info("Shutting down bot gracefully...")
+    logger.info("Shutting down gracefully...")
     sys.exit(0)
 
-def main() -> None:
+async def run_dash():
+    await serve(server, config)
+
+async def run_telegram_bot():
     try:
-        # Initialize the Telegram bot
         application = Application.builder().token(BOT_TOKEN).build()
 
         # Add handlers
@@ -48,15 +54,25 @@ def main() -> None:
         application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        # Start the bot
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+        logger.info("Telegram bot started successfully")
+
+        # Run until the application is stopped
+        await application.updater.stop()
+        await application.stop()
 
     except Exception as e:
-        logger.error("Error starting bot", exc_info=True)
+        logger.error("Error running Telegram bot", exc_info=True)
+
+async def main():
+    dash_task = asyncio.create_task(run_dash())
+    telegram_task = asyncio.create_task(run_telegram_bot())
+
+    await asyncio.gather(dash_task, telegram_task)
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
-
-    # Run the Dash app and Telegram bot concurrently
-    from werkzeug.serving import run_simple
-    run_simple('0.0.0.0', PORT or 3001, server, use_reloader=True, use_debugger=True)
+    asyncio.run(main())
