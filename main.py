@@ -9,6 +9,8 @@ from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
 from dash import Dash, html  # Import necessary Dash components
+from config import PORT
+
 
 # Logging configuration
 logging.basicConfig(
@@ -25,7 +27,7 @@ app.layout = html.Div("Hello from Dash!")
 
 # Function to run the Dash server
 def run_dash():
-    app.run_server(debug=True, port=4000, host='0.0.0.0')
+    app.run_server(debug=True, PORT || 3001, host='0.0.0.0')
 
 def signal_handler(sig, frame):
     logger.info("Shutting down bot gracefully...")
