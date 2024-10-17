@@ -28,9 +28,16 @@ dash_app.layout = html.Div("Hello from Dash!")
 server = Quart(__name__)
 dash_app.server = server
 
+# Add a route for the root URL
+@server.route('/')
+async def hello():
+    return "Hello, World!"
+
 # Configure Hypercorn
 config = Config()
 config.bind = [f"0.0.0.0:{PORT or 3001}"]
+config.use_reloader = False
+config.workers = 1
 
 def signal_handler(sig, frame):
     logger.info("Shutting down gracefully...")
