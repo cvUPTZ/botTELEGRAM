@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import signal
-import sys
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -10,7 +9,7 @@ from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
 from dash import Dash, html
-from flask import Flask  # Import Flask instead of Quart
+from flask import Flask  # Import Flask
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
 
@@ -22,12 +21,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize the Flask app
-flask_app = Flask(__name__)  # Create a Flask app
-dash_app = Dash(__name__, server=flask_app)  # Use the Flask app as the server
+app = Flask(__name__)  # Set the app variable as required by Vercel
+dash_app = Dash(__name__, server=app)  # Use the Flask app as the server
 dash_app.layout = html.Div("Hello from Dash!")
 
 # Add a route for the root URL (this also serves as a health check endpoint)
-@flask_app.route('/')
+@app.route('/')
 def hello():
     return "Hello, World!"
 
@@ -46,7 +45,7 @@ def signal_handler(sig, frame):
     bot_running = False
 
 async def run_dash():
-    await serve(flask_app, config)  # Serve the Flask app
+    await serve(app, config)  # Serve the Flask app
 
 async def run_telegram_bot():
     global bot_running
