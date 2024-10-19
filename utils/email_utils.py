@@ -14,9 +14,14 @@ async def send_email_with_cv(email, cv_type, user_id):
     
     sent_emails = load_sent_emails()
     
-    # Check if either email or user_id has already received a CV
-    if email in sent_emails or str(user_id) in sent_emails:
-        return '📩 Vous avez déjà reçu un CV. Vous êtes limité à un seul type de CV par utilisateur et par email. 🚫'
+    # Check if the user (by email or user_id) has already received a CV
+    user_entry = sent_emails.get(email) or sent_emails.get(str(user_id))
+    
+    if user_entry:
+        if user_entry['cv_type'] == cv_type:
+            return f'📩 Vous avez déjà reçu un CV de type {cv_type}. Vous ne pouvez pas en demander un autre du même type.'
+        else:
+            return f'📩 Vous avez déjà reçu un CV de type {user_entry["cv_type"]}. Vous ne pouvez pas demander un CV de type différent.'
     
     try:
         msg = MIMEMultipart()
@@ -37,8 +42,9 @@ async def send_email_with_cv(email, cv_type, user_id):
             server.sendmail(EMAIL_ADDRESS, email, msg.as_string())
         
         # Store both email and user_id as keys in the sent_emails dictionary
-        sent_emails[email] = cv_type
-        sent_emails[str(user_id)] = cv_type
+        user_data = {'cv_type': cv_type, 'email': email, 'user_id': str(user_id)}
+        sent_emails[email] = user_data
+        sent_emails[str(user_id)] = user_data
         save_sent_emails(sent_emails)
         
         return (f'✅ Le CV de type {cv_type.capitalize()} a été envoyé à {email}. ✉️\n\n'
