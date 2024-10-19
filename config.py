@@ -2,6 +2,12 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+# Supabase table names
+QUESTIONS_TABLE = 'questions'
+SENT_EMAILS_TABLE = 'sent_emails'
+SCRAPED_DATA_TABLE = 'scraped_data'
+USERS_TABLE = 'users'
+
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
