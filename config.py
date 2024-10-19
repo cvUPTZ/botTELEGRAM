@@ -2,10 +2,17 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+# Supabase table names
+QUESTIONS_TABLE = 'questions'
+SENT_EMAILS_TABLE = 'sent_emails'
+SCRAPED_DATA_TABLE = 'scraped_data'
+USERS_TABLE = 'users'
 
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-PORT = int(os.getenv('PORT', 8443))
+PORT = int(os.getenv('PORT', 4000))
 EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 SMTP_SERVER = os.getenv('SMTP_SERVER')
