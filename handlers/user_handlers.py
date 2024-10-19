@@ -55,12 +55,13 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     
     email, cv_type = parts
+    user_id = update.effective_user.id
     
     if cv_type.lower() not in ['junior', 'senior']:
         await update.effective_message.reply_text('❌ Type de CV invalide. Choisissez "junior" ou "senior".')
         return
     
-    result = await send_email_with_cv(email, cv_type.lower())
+    result = await send_email_with_cv(email, cv_type.lower(), user_id)
     await update.effective_message.reply_text(result)
 
 async def send_usage_instructions(message):
