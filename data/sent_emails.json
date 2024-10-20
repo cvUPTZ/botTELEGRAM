@@ -1,10 +1,64 @@
 {
-    "ademabidi2082000@gmail.com": "junior",
-    "mohamedmahari566@gmail.com": "junior",
-    "helalkaouther5@gmail.com": "junior",
-    "b.imadeddine99@gmail.com": "junior",
-    "benadlamohammedsamir@gmail.com": "junior",
-    "taousseng90@gmail.com": "junior",
-    "benferdjallah.djafar@gmail.com": "junior",
-    "boureghdaimtinane@gmail.com": "junior"
+    "example@example.com": {
+        "id": "example@example.com",
+        "email": "example@example.com",
+        "status": "sent"
+    },
+    "ademabidi2082000@gmail.com": {
+        "id": "ademabidi2082000@gmail.com",
+        "email": "ademabidi2082000@gmail.com",
+        "status": "junior"
+    },
+    "mohamedmahari566@gmail.com": {
+        "id": "mohamedmahari566@gmail.com",
+        "email": "mohamedmahari566@gmail.com",
+        "status": "junior"
+    },
+    "helalkaouther5@gmail.com": {
+        "id": "helalkaouther5@gmail.com",
+        "email": "helalkaouther5@gmail.com",
+        "status": "junior"
+    },
+    "b.imadeddine99@gmail.com": {
+        "id": "b.imadeddine99@gmail.com",
+        "email": "b.imadeddine99@gmail.com",
+        "status": "junior"
+    },
+    "benadlamohammedsamir@gmail.com": {
+        "id": "benadlamohammedsamir@gmail.com",
+        "email": "benadlamohammedsamir@gmail.com",
+        "status": "junior"
+    },
+    "taousseng90@gmail.com": {
+        "id": "taousseng90@gmail.com",
+        "email": "taousseng90@gmail.com",
+        "status": "junior"
+    },
+    "benferdjallah.djafar@gmail.com": {
+        "id": "benferdjallah.djafar@gmail.com",
+        "email": "benferdjallah.djafar@gmail.com",
+        "status": "junior"
+    },
+    "boureghdaimtinane@gmail.com": {
+        "id": "boureghdaimtinane@gmail.com",
+        "email": "boureghdaimtinane@gmail.com",
+        "status": "junior"
+    },
+    "excelzed@gmail.com": {
+        "cv_type": "junior",
+        "email": "excelzed@gmail.com",
+        "user_id": "1719899525"
+    },
+    "1719899525": {
+        "cv_type": "senior",
+        "email": "houdachezaki@gmail.com"
+    },
+    "1719899525": {
+        "cv_type": "senior",
+        "email": "notifications@pipedream.com"
+    },
+    "1076841776": {
+        "cv_type": "senior",
+        "email": "perlalavanda@gmail.com"
+    }
 }

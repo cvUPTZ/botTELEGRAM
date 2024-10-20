@@ -36,7 +36,7 @@ def load_questions():
 def save_questions(questions):
     try:
         # Save to JSON first
-        with open(QUESTIONS_JSON_FILE, 'w') as json_file:
+        with open(QUESTIONS_FILE, 'w') as json_file:
             json.dump(questions, json_file)
 
         # Then save to Supabase
@@ -45,18 +45,35 @@ def save_questions(questions):
     except Exception as e:
         logger.error(f"Error saving questions to Supabase: {str(e)}")
 
+
+
 def load_sent_emails():
     try:
-        response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
-        return {str(item['id']): item for item in response.data}
-    except Exception as e:
-        logger.error(f"Error loading sent emails from Supabase: {str(e)}")
+        with open(SENT_EMAILS_FILE, 'r') as json_file:
+            return json.load(json_file)
+    except FileNotFoundError:
+        # If the file doesn't exist, return an empty dictionary
         return {}
+    except json.JSONDecodeError:
+        logger.error("Error decoding JSON from the sent emails file")
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading sent emails from JSON file: {str(e)}")
+        return {}
+
+
+# def load_sent_emails():
+#     try:
+#         response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
+#         return {str(item['id']): item for item in response.data}
+#     except Exception as e:
+#         logger.error(f"Error loading sent emails from Supabase: {str(e)}")
+#         return {}
 
 def save_sent_emails(sent_emails):
     try:
         # Save to JSON first
-        with open(SENT_EMAILS_JSON_FILE, 'w') as json_file:
+        with open(SENT_EMAILS_FILE, 'w') as json_file:
             json.dump(sent_emails, json_file)
 
         # Then save to Supabase
@@ -76,7 +93,7 @@ def load_scraped_data():
 def save_scraped_data(scraped_data):
     try:
         # Save to JSON first
-        with open(SCRAPED_DATA_JSON_FILE, 'w') as json_file:
+        with open(SCRAPED_DATA_FILE, 'w') as json_file:
             json.dump(scraped_data, json_file)
 
         # Then save to Supabase
