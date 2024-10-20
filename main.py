@@ -7,8 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
-from handlers.user_handlers import start, ask_question, send_cv, my_id, cv_conv_handler
-# from handlers.user_handlers import start, my_id, 
+from handlers.user_handlers import start, ask_question, send_cv, my_id
 
 from handlers.message_handlers import welcome_new_member, handle_message
 from dash import Dash, html
@@ -76,10 +75,7 @@ async def run_telegram_bot():
         
         # Start polling in a separate task
         polling_task = asyncio.create_task(
-            application.updater.start_polling(
-                allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY],
-                drop_pending_updates=True
-            )
+            application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         )
 
         logger.info("Telegram bot started successfully")
@@ -93,7 +89,7 @@ async def run_telegram_bot():
         await polling_task
         await application.stop()
         await application.shutdown()
-       
+        
     except Exception as e:
         logger.error("Error running Telegram bot", exc_info=True)
 
