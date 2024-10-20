@@ -7,7 +7,9 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
-from handlers.user_handlers import start, ask_question, send_cv, my_id
+from handlers.user_handlers import start, ask_question, send_cv, my_id, cv_conv_handler
+# from handlers.user_handlers import start, my_id, 
+
 from handlers.message_handlers import welcome_new_member, handle_message
 from dash import Dash, html
 from quart import Quart
@@ -63,6 +65,8 @@ async def run_telegram_bot():
         application.add_handler(CommandHandler("sendcv", send_cv))
         application.add_handler(CommandHandler("myid", my_id))
         application.add_handler(CommandHandler("tagall", tag_all))
+        application.add_handler(cv_conv_handler)  # Add the new conversation handler here
+
         application.add_handler(CommandHandler("offremploi", offremploi))
         application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
