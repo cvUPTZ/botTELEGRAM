@@ -68,6 +68,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def linkedin_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
+    logger.info(f"Callback data: {query.data}")  # Add this line to check the callback data
     await query.answer()
 
     if query.data == 'cancel':
@@ -81,6 +82,7 @@ async def linkedin_confirmation(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
     return EMAIL_CV_TYPE
+
 
 async def process_email_cv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     input_text = update.message.text
