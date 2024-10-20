@@ -1,8 +1,8 @@
 from postgrest.exceptions import APIError
 import json
-from supabase_config import supabase
 from config import QUESTIONS_FILE, SENT_EMAILS_FILE, SCRAPED_DATA_FILE
 from config import QUESTIONS_TABLE, SENT_EMAILS_TABLE, SCRAPED_DATA_TABLE
+from utils.file_utils import check_supabase_connection
 
 def migrate_json_to_supabase(file_path, table_name):
     with open(file_path, 'r') as file:
@@ -28,6 +28,7 @@ def migrate_json_to_supabase(file_path, table_name):
     print(f"Finished processing data from {file_path} to {table_name} table in Supabase")
 
 if __name__ == "__main__":
+    check_supabase_connection()  # Check connection before proceeding
     migrate_json_to_supabase(QUESTIONS_FILE, QUESTIONS_TABLE)
     migrate_json_to_supabase(SENT_EMAILS_FILE, SENT_EMAILS_TABLE)
     

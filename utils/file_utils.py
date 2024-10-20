@@ -1,8 +1,19 @@
 import logging
+import sys
 from supabase_config import supabase
 from config import QUESTIONS_TABLE, SENT_EMAILS_TABLE, SCRAPED_DATA_TABLE, USERS_TABLE
 
 logger = logging.getLogger(__name__)
+
+def check_supabase_connection():
+    try:
+        supabase.table(SENT_EMAILS_TABLE).select("id").limit(1).execute()
+
+        supabase.table(QUESTIONS_TABLE).select("id").limit(1).execute()
+        logger.info("Supabase connection successful")
+    except Exception as e:
+        logger.error(f"Failed to connect to Supabase: {str(e)}", exc_info=True)
+        sys.exit(1)
 
 def load_questions():
     try:
