@@ -45,12 +45,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    logger.info(f"send_cv called by user {update.effective_user.id}")
     topic_id = 3137
     if update.effective_message.message_thread_id != topic_id:
         await update.effective_message.reply_text('🚫 Cette commande est restreinte au topic CV_UP إحصل على نموذج السيرة')
         return ConversationHandler.END
 
-    # Create inline keyboard for LinkedIn confirmation
     keyboard = [
         [InlineKeyboardButton("✅ J'ai suivi la page", callback_data='linkedin_followed')],
         [InlineKeyboardButton("❌ Annuler", callback_data='cancel')]
@@ -58,31 +58,54 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.effective_message.reply_text(
-        "Avant de recevoir votre CV, veuillez suivre notre page LinkedIn:\n"
+        "AAvant de recevoir votre CV, veuillez suivre notre page LinkedIn:\n"
         "https://www.linkedin.com/company/cv-updz\n\n"
         "Une fois que vous avez suivi la page, cliquez sur le bouton ci-dessous.",
         reply_markup=reply_markup
     )
 
+    logger.info("Initial message sent, waiting for user confirmation")
     return LINKEDIN_CONFIRMATION
 
+# async def linkedin_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     query = update.callback_query
+#     logger.info(f"Callback data: {query.data}")  # Add this line to check the callback data
+#     await query.answer()
+
+#     if query.data == 'cancel':
+#         await query.edit_message_text("Opération annulée. Utilisez /sendcv pour recommencer.")
+#         return ConversationHandler.END
+
+#     await query.edit_message_text("Merci d'avoir suivi notre page LinkedIn!")
+#     await query.message.reply_text(
+#         "Maintenant, veuillez fournir votre email et le type de CV souhaité (junior ou senior) dans le format suivant:\n"
+#         "email@example.com junior"
+#     )
+
+#     return EMAIL_CV_TYPE
+
+
 async def linkedin_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    logger.info("linkedin_confirmation function called")
     query = update.callback_query
-    logger.info(f"Callback data: {query.data}")  # Add this line to check the callback data
     await query.answer()
 
     if query.data == 'cancel':
+        logger.info("User canceled the operation")
         await query.edit_message_text("Opération annulée. Utilisez /sendcv pour recommencer.")
         return ConversationHandler.END
 
-    await query.edit_message_text("Merci d'avoir suivi notre page LinkedIn!")
-    await query.message.reply_text(
-        "Maintenant, veuillez fournir votre email et le type de CV souhaité (junior ou senior) dans le format suivant:\n"
-        "email@example.com junior"
-    )
+    if query.data == 'linkedin_followed':
+        logger.info("User confirmed following LinkedIn")
+        await query.edit_message_text("Merci d'avoir suivi notre page LinkedIn!")
+        await query.message.reply_text(
+            "Maintenant, veuillez fournir votre email et le type de CV souhaité (junior ou senior) dans le format suivant:\n"
+            "email@example.com junior"
+        )
+        return EMAIL_CV_TYPE
 
-    return EMAIL_CV_TYPE
-
+    logger.warning(f"Unexpected callback data: {query.data}")
+    return ConversationHandler.END
 
 async def process_email_cv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     input_text = update.message.text
@@ -112,12 +135,24 @@ async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
 
-# Create the conversation handler
+
+
 cv_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("sendcv", send_cv)],
     states={
         LINKEDIN_CONFIRMATION: [CallbackQueryHandler(linkedin_confirmation)],
         EMAIL_CV_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_email_cv_type)]
     },
-    fallbacks=[CommandHandler("cancel", cancel)]
+    fallbacks=[CommandHandler("cancel", cancel)],
+    per_message=False
+
 )
+# cv_conv_handler = ConversationHandler(
+#     entry_points=[CommandHandler("sendcv", send_cv)],
+#     states={
+#         LINKEDIN_CONFIRMATION: [CallbackQueryHandler(linkedin_confirmation, per_message=True)],  # Set per_message=True
+#         EMAIL_CV_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_email_cv_type)]
+#     },
+#     fallbacks=[CommandHandler("cancel", cancel)],
+#     per_message=True  # Track every message in this handler
+# )
