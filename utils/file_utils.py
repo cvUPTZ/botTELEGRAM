@@ -7,9 +7,9 @@ from config import (
     SENT_EMAILS_TABLE,
     SCRAPED_DATA_TABLE,
     USERS_TABLE,
-    QUESTIONS_JSON_FILE,  # Add this constant for JSON file paths
-    SENT_EMAILS_JSON_FILE,
-    SCRAPED_DATA_JSON_FILE,
+    QUESTIONS_FILE,  # Add this constant for JSON file paths
+    SENT_EMAILS_FILE,
+    SCRAPED_DATA_FILE,
 )
 
 logger = logging.getLogger(__name__)
