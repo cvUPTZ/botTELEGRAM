@@ -1,14 +1,22 @@
 import logging
 import sys
+import json  # Import json for saving data to JSON files
 from supabase_config import supabase
-from config import QUESTIONS_TABLE, SENT_EMAILS_TABLE, SCRAPED_DATA_TABLE, USERS_TABLE
+from config import (
+    QUESTIONS_TABLE,
+    SENT_EMAILS_TABLE,
+    SCRAPED_DATA_TABLE,
+    USERS_TABLE,
+    QUESTIONS_JSON_FILE,  # Add this constant for JSON file paths
+    SENT_EMAILS_JSON_FILE,
+    SCRAPED_DATA_JSON_FILE,
+)
 
 logger = logging.getLogger(__name__)
 
 def check_supabase_connection():
     try:
         supabase.table(SENT_EMAILS_TABLE).select("id").limit(1).execute()
-
         supabase.table(QUESTIONS_TABLE).select("id").limit(1).execute()
         logger.info("Supabase connection successful")
     except Exception as e:
@@ -27,6 +35,11 @@ def load_questions():
 
 def save_questions(questions):
     try:
+        # Save to JSON first
+        with open(QUESTIONS_JSON_FILE, 'w') as json_file:
+            json.dump(questions, json_file)
+
+        # Then save to Supabase
         for question_id, question_data in questions.items():
             supabase.table(QUESTIONS_TABLE).upsert(question_data, on_conflict='id').execute()
     except Exception as e:
@@ -42,6 +55,11 @@ def load_sent_emails():
 
 def save_sent_emails(sent_emails):
     try:
+        # Save to JSON first
+        with open(SENT_EMAILS_JSON_FILE, 'w') as json_file:
+            json.dump(sent_emails, json_file)
+
+        # Then save to Supabase
         for email_id, email_data in sent_emails.items():
             supabase.table(SENT_EMAILS_TABLE).upsert(email_data, on_conflict='id').execute()
     except Exception as e:
@@ -54,6 +72,18 @@ def load_scraped_data():
     except Exception as e:
         logger.error(f"Error loading scraped data from Supabase: {str(e)}")
         return []
+
+def save_scraped_data(scraped_data):
+    try:
+        # Save to JSON first
+        with open(SCRAPED_DATA_JSON_FILE, 'w') as json_file:
+            json.dump(scraped_data, json_file)
+
+        # Then save to Supabase
+        for data in scraped_data:
+            supabase.table(SCRAPED_DATA_TABLE).insert({'data': data}).execute()
+    except Exception as e:
+        logger.error(f"Error saving scraped data to Supabase: {str(e)}")
 
 def track_user(user_id, chat_id):
     try:
