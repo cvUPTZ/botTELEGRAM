@@ -21,8 +21,8 @@ CV_FILES = {
     'junior': os.getenv('JUNIOR_CV_FILE'),
     'senior': os.getenv('SENIOR_CV_FILE')
 }
-QUESTIONS_FILE = 'data/questions.json'
-SENT_EMAILS_FILE = 'data/sent_emails.json'
+QUESTIONS_FILE = 'telegrambot/data/questions.json'
+SENT_EMAILS_FILE = 'telegrambot/data/sent_emails.json'
 SCRAPED_DATA_FILE = 'data/scraped_data.json'
 ADMIN_USER_IDS = [int(id.strip()) for id in os.getenv('ADMIN_USER_IDS', '').split(',') if id.strip()]
 
