@@ -13,6 +13,7 @@ LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET')
 LINKEDIN_REDIRECT_URI = 'https://bot-telegram-pied.vercel.app/linkedin-callback'
 LINKEDIN_SCOPE = 'openid,profile,email'
 REDIS_URL = os.getenv('REDIS_URL')
+COMPANY_PAGE_ID=105488010
 
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
