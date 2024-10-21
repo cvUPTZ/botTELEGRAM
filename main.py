@@ -40,13 +40,29 @@ def signal_handler(sig, frame):
 
 async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    cv_type = 'junior'  # Default CV type; adjust based on requirements or user input
+    
+    # Check if cv_type is provided as an argument
+    if len(context.args) < 1:
+        await update.message.reply_text('❗ Veuillez fournir le type de CV (junior ou senior).')
+        return
+    
+    cv_type = context.args[0].lower()
+
+    # Validate the CV type
+    if cv_type not in ['junior', 'senior']:
+        await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
+        return
+    
+    # Construct the authentication URL with user_id and cv_type
     auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
-    keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
+    
+    # Create an inline button that directs to the LinkedIn auth page
+    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Send a message with the verification button
     await update.message.reply_text(
-        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn :",
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
         reply_markup=reply_markup
     )
 
