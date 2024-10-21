@@ -102,9 +102,6 @@ def start_linkedin_auth(user_id, cv_type):
 
 @app.route('/linkedin-callback')
 async def linkedin_callback():
-    # Log all request args for debugging
-    print(request.args)
-
     code = request.args.get('code')
     state = request.args.get('state')
 
@@ -112,24 +109,30 @@ async def linkedin_callback():
         return "State parameter is missing", 400
 
     try:
-        user_id, cv_type = state.split('|')
+        user_id, cv_type, email = state.split('|')
     except ValueError:
         return "Invalid state format", 400
 
-    # Exchange code for access token
     tokens = await exchange_code_for_tokens(code)
     access_token = tokens.get('access_token')
 
     if not access_token:
         return "Access token not received", 400
 
-    # Check if user follows the company page
     if await check_follow_status(access_token, COMPANY_PAGE_ID):
-        # User follows the page, store the verification in Redis
-        await asyncio.to_thread(redis_client.set, f"linkedin_verified:{user_id}", cv_type)
-        return "Thank you for following our page! Your CV has been sent."
+        # User follows the company page, mark as verified
+        redis_client.set(f"linkedin_verified:{user_id}", "true")
+        
+        # Send CV automatically
+        try:
+            result = await send_email_with_cv(email, cv_type, int(user_id))
+            await bot.send_message(chat_id=user_id, text=result)
+        except Exception as e:
+            error_message = f"Une erreur s'est produite lors de l'envoi du CV: {str(e)}"
+            await bot.send_message(chat_id=user_id, text=error_message)
+        
+        return "Vérification réussie ! Votre CV a été envoyé. Vous pouvez fermer cette fenêtre et retourner au bot Telegram."
     else:
-        # User doesn't follow the page, redirect to follow
         follow_url = f"https://www.linkedin.com/company/{COMPANY_PAGE_ID}/"
         return redirect(follow_url)
 
