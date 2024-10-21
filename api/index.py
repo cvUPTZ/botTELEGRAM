@@ -89,6 +89,8 @@ async def webhook():
 #     await application.shutdown()
     
 #     return "Verification successful! You can close this window and return to the Telegram bot."
+
+
 @app.route('/start-linkedin-auth/<int:user_id>/<cv_type>')
 def start_linkedin_auth(user_id, cv_type):
     auth_url = (
@@ -97,7 +99,6 @@ def start_linkedin_auth(user_id, cv_type):
         f"&state={user_id}|{cv_type}&scope=openid%20profile%20email"
     )
     return redirect(auth_url)
-    
 
 @app.route('/linkedin-callback')
 async def linkedin_callback():
@@ -108,33 +109,30 @@ async def linkedin_callback():
     state = request.args.get('state')
 
     if state is None:
-        return "State parameter is missing", 400  # Return an error if state is None
+        return "State parameter is missing", 400
 
     try:
         user_id, cv_type = state.split('|')
     except ValueError:
-        return "Invalid state format", 400  # Return an error if state format is invalid
+        return "Invalid state format", 400
 
     # Exchange code for access token
     tokens = await exchange_code_for_tokens(code)
     access_token = tokens.get('access_token')
 
     if not access_token:
-        return "Access token not received", 400  # Handle error if access token is not available
+        return "Access token not received", 400
 
     # Check if user follows the company page
     if await check_follow_status(access_token, COMPANY_PAGE_ID):
-        # User follows the page, send CV
-        await send_cv(user_id, cv_type)
+        # User follows the page, store the verification in Redis
+        await asyncio.to_thread(redis_client.set, f"linkedin_verified:{user_id}", cv_type)
         return "Thank you for following our page! Your CV has been sent."
     else:
         # User doesn't follow the page, redirect to follow
         follow_url = f"https://www.linkedin.com/company/{COMPANY_PAGE_ID}/"
         return redirect(follow_url)
 
-
-
-# Function to exchange the authorization code for access and ID tokens
 async def exchange_code_for_tokens(code):
     token_url = "https://www.linkedin.com/oauth/v2/accessToken"
     data = {
@@ -148,9 +146,7 @@ async def exchange_code_for_tokens(code):
     tokens = response.json()
     return tokens
 
-# Function to check if the user follows the company page
 async def check_follow_status(access_token, company_id):
-    # LinkedIn API to check if a user follows the company page
     headers = {
         "Authorization": f"Bearer {access_token}",
         "X-Restli-Protocol-Version": "2.0.0"
@@ -161,14 +157,11 @@ async def check_follow_status(access_token, company_id):
     data = response.json()
     
     if response.status_code == 200:
-        # Process the follower statistics to check if the user follows
         if data.get('elements'):
-            # Assuming the elements array contains relevant data about the user's follow status
             return True
         else:
             return False
     else:
-        # Handle error responses
         print(f"Error checking follow status: {response.status_code}, {response.text}")
         return False
 
