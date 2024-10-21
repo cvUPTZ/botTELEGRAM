@@ -7,7 +7,11 @@ from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
 from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile
 from config import LINKEDIN_REDIRECT_URI
-
+# from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CommandHandler
+from config import ADMIN_IDS, LINKEDIN_REDIRECT_URI
+# from utils.linkedin_utils import is_linkedin_verified
+# from utils.email_utils import send_email_with_cv
 import json  # Import json for saving data to JSON files
 from config import (
     QUESTIONS_TABLE,
@@ -77,6 +81,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 sent_emails = load_sent_emails()
 
 ADMIN_IDS = {1719899525, 987654321}  # Replace with actual admin IDs
+
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     logger.info(f"send_cv command received from user {user_id}")
@@ -97,11 +102,13 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Check if the user is an admin
     is_admin = user_id in ADMIN_IDS
     
-    if not is_admin and not is_linkedin_verified(user_id):
-        logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
-        await start_linkedin_verification(update, context, user_id, cv_type)
-        return
+    if not is_admin:
+        if not is_linkedin_verified(user_id):
+            logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
+            await start_linkedin_verification(update, context, user_id, cv_type, email)
+            return
     
+    # If the user is an admin or already verified, proceed with sending the CV
     try:
         result = await send_email_with_cv(email, cv_type, user_id)
         logger.info(f"CV sending result for user {user_id}: {result}")
@@ -117,14 +124,18 @@ async def send_usage_instructions(message):
         'Exemple : /sendcv email@gmail.com junior'
     )
 
-async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, cv_type: str):
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, cv_type: str, email: str):
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}/{email}"
     keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
+        "Pour recevoir votre CV, veuillez d'abord vérifier votre profil LinkedIn. "
+        "Cliquez sur le bouton ci-dessous pour commencer la vérification:",
         reply_markup=reply_markup
     )
+
+# def setup_send_cv_handler(application):
+#     application.add_handler(CommandHandler("sendcv", send_cv))
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
