@@ -42,19 +42,20 @@ async def start_linkedin_verification(update: Update, context: ContextTypes.DEFA
     user_id = update.effective_user.id
     
     # Check if cv_type is provided as an argument
-    if len(context.args) < 1:
+    if not context.args:
         await update.message.reply_text('❗ Veuillez fournir le type de CV (junior ou senior).')
         return
     
     cv_type = context.args[0].lower()
 
     # Validate the CV type
-    if cv_type not in ['junior', 'senior']:
-        await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
+    valid_cv_types = ['junior', 'senior']
+    if cv_type not in valid_cv_types:
+        await update.message.reply_text(f'❌ Type de CV incorrect. Veuillez utiliser "{valid_cv_types[0]}" ou "{valid_cv_types[1]}".')
         return
     
     # Construct the authentication URL with user_id and cv_type
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+    auth_url = f"{LINKEDIN_REDIRECT_URI.rstrip('/linkedin-callback')}/start-linkedin-auth/{user_id}/{cv_type}"
     
     # Create an inline button that directs to the LinkedIn auth page
     keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
@@ -62,9 +63,10 @@ async def start_linkedin_verification(update: Update, context: ContextTypes.DEFA
     
     # Send a message with the verification button
     await update.message.reply_text(
-        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn :",
         reply_markup=reply_markup
     )
+
 
 def create_application():
     application = Application.builder().token(BOT_TOKEN).build()
