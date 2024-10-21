@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, redirect
 from telegram import Update
 from main import create_application
-from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL
+from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL,COMPANY_PAGE_ID
 import asyncio
 import requests
 from jwt import PyJWKClient
