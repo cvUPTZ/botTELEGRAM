@@ -81,11 +81,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 sent_emails = load_sent_emails()
 
 ADMIN_USER_IDS = {1719899525, 987654321}  # Replace with actual admin IDs
-
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     logger.info(f"send_cv command received from user {user_id}")
     
+    # Ensure the correct number of arguments
     if len(context.args) != 2:
         logger.info(f"Incorrect number of arguments provided by user {user_id}. Sending usage instructions.")
         await send_usage_instructions(update.message)
@@ -94,6 +94,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     email, cv_type = context.args
     logger.info(f"User {user_id} requested CV type '{cv_type}' to be sent to {email}")
     
+    # Validate CV type
     if cv_type.lower() not in ['junior', 'senior']:
         logger.info(f"Invalid CV type '{cv_type}' requested by user {user_id}")
         await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
@@ -108,14 +109,19 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await start_linkedin_verification(update, context, user_id, cv_type, email)
             return
     
-    # If the user is an admin or already verified, proceed with sending the CV
+    # Proceed with sending the CV if the user is an admin or LinkedIn verified
     try:
         result = await send_email_with_cv(email, cv_type, user_id)
         logger.info(f"CV sending result for user {user_id}: {result}")
         await update.message.reply_text(result)
+        
+        # Update sent emails and save to JSON
+        sent_emails[user_id] = {'email': email, 'cv_type': cv_type}
+        save_sent_emails(sent_emails)
     except Exception as e:
         logger.error(f"Error in send_cv for user {user_id}: {str(e)}", exc_info=True)
         await update.message.reply_text('❌ Une erreur s\'est produite lors de l\'envoi du CV. Veuillez réessayer plus tard.')
+
 
 async def send_usage_instructions(message):
     await message.reply_text(
