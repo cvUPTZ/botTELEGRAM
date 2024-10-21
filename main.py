@@ -5,7 +5,10 @@ import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-from config import BOT_TOKEN, LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI, REDIS_URL
+from config import BOT_TOKEN, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, LINKEDIN_SCOPE, REDIS_URL
+from handlers.admin_handlers import liste_questions, tag_all, offremploi
+from handlers.user_handlers import start, ask_question, send_cv, my_id
+from handlers.message_handlers import welcome_new_member, handle_message
 import redis
 
 # Logging configuration
@@ -25,38 +28,6 @@ def signal_handler(sig, frame):
     global bot_running
     logger.info("Shutting down gracefully...")
     bot_running = False
-
-# Handler functions
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! Use /help to see available commands.")
-
-async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("What's your question?")
-
-async def liste_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Here's a list of frequently asked questions...")
-
-async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Please send your CV as a file.")
-
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"Your Telegram ID is: {user_id}")
-
-async def tag_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Implement the logic to tag all users in the group
-    await update.message.reply_text("Tagging all users...")
-
-async def offremploi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Here are the latest job offers...")
-
-async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for new_member in update.message.new_chat_members:
-        await update.message.reply_text(f"Welcome {new_member.first_name} to the group!")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Implement general message handling logic
-    await update.message.reply_text("I received your message.")
 
 async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
