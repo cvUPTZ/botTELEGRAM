@@ -99,9 +99,34 @@ async def start_linkedin_verification(update: Update, context: ContextTypes.DEFA
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    logger.info(f"send_cv command received from user {user_id}")
+    
     if not is_linkedin_verified(user_id):
+        logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
         await start_linkedin_verification(update, context)
         return
+    
+    if len(context.args) != 2:
+        logger.info(f"Incorrect number of arguments provided by user {user_id}. Sending usage instructions.")
+        await send_usage_instructions(update.message)
+        return
+    
+    email, cv_type = context.args
+    logger.info(f"User {user_id} requested CV type '{cv_type}' to be sent to {email}")
+    
+    if cv_type.lower() not in ['junior', 'senior']:
+        logger.info(f"Invalid CV type '{cv_type}' requested by user {user_id}")
+        await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
+        return
+    
+    try:
+        logger.info(f"Attempting to send CV to {email} for user {user_id}")
+        result = await send_email_with_cv(email, cv_type, user_id)
+        logger.info(f"CV sending result for user {user_id}: {result}")
+        await update.message.reply_text(result)
+    except Exception as e:
+        logger.error(f"Error in send_cv for user {user_id}: {str(e)}", exc_info=True)
+        await update.message.reply_text('❌ Une erreur s\'est produite lors de l\'envoi du CV. Veuillez réessayer plus tard.')
 
 async def send_usage_instructions(message):
     await message.reply_text(
