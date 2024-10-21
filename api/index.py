@@ -93,7 +93,7 @@ def create_application():
     
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("question", ask_question))
+    # application.add_handler(CommandHandler("question", ask_question))
     # application.add_handler(CommandHandler("liste_questions", liste_questions))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
