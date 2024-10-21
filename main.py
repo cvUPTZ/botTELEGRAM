@@ -28,13 +28,25 @@ def signal_handler(sig, frame):
     logger.info("Shutting down gracefully...")
     bot_running = False
 
+# async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     user_id = update.effective_user.id
+#     auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+#     keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
+#     reply_markup = InlineKeyboardMarkup(keyboard)
+#     await update.message.reply_text(
+#         "Please click the button below to verify your LinkedIn profile:",
+#         reply_markup=reply_markup
+#     )
+
 async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}"
+    cv_type = 'junior'  # Default CV type; adjust based on requirements or user input
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
     keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        "Please click the button below to verify your LinkedIn profile:",
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn :",
         reply_markup=reply_markup
     )
 
