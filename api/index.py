@@ -91,12 +91,15 @@ async def linkedin_callback():
     tokens = response.json()
     access_token = tokens.get('access_token')
     id_token = tokens.get('id_token')
+
+    # Convert the id_token to bytes
+    id_token_bytes = id_token.encode('utf-8') if isinstance(id_token, str) else id_token
     
     # Decode and verify the ID token
     jwks_client = PyJWKClient("https://www.linkedin.com/oauth/openid/jwks")
-    signing_key = await asyncio.to_thread(jwks_client.get_signing_key_from_jwt, id_token)
+    signing_key = await asyncio.to_thread(jwks_client.get_signing_key_from_jwt, id_token_bytes)
     data = jwt.decode(
-        id_token,
+        id_token_bytes,
         signing_key.key,
         algorithms=["RS256"],
         audience=LINKEDIN_CLIENT_ID,
@@ -119,6 +122,7 @@ async def linkedin_callback():
     await bot.send_message(chat_id=state, text="LinkedIn verification successful! You can now use all bot features.")
     
     return "Verification successful! You can close this window and return to the Telegram bot."
+
 
 async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
