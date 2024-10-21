@@ -4,11 +4,10 @@ import signal
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-
-from config import BOT_TOKEN, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, LINKEDIN_SCOPE, REDIS_URL
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
+from config import BOT_TOKEN, LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI, REDIS_URL
 import redis
 
 # Logging configuration
