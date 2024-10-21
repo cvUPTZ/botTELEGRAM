@@ -8,3 +8,5 @@ Werkzeug==3.0.0  # version known to work with Dashs
 quart==0.19.4
 hypercorn==0.15.0
 supabase==1.0.3
+PyJWT
+redis
