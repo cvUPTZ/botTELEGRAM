@@ -9,6 +9,11 @@ from utils.file_utils import load_sent_emails, save_sent_emails
 from utils.linkedin_utils import is_linkedin_verified
 
 logger = logging.getLogger(__name__)
+ADMIN_IDS = [1719899525, 987654321]  # Replace with actual admin Telegram user IDs
+# CV_FILES = {
+#     'junior': 'path/to/junior_cv.docx',
+#     'senior': 'path/to/senior_cv.docx'
+# }
  
 async def send_email_with_cv(email, cv_type, user_id):
     if cv_type.lower() not in CV_FILES:
