@@ -44,19 +44,6 @@
         "email": "boureghdaimtinane@gmail.com",
         "status": "junior"
     },
-    "excelzed@gmail.com": {
-        "cv_type": "junior",
-        "email": "excelzed@gmail.com",
-        "user_id": "1719899525"
-    },
-    "1719899525": {
-        "cv_type": "senior",
-        "email": "houdachezaki@gmail.com"
-    },
-    "1719899525": {
-        "cv_type": "senior",
-        "email": "notifications@pipedream.com"
-    },
     "1076841776": {
         "cv_type": "senior",
         "email": "perlalavanda@gmail.com"
@@ -64,5 +51,13 @@
     "291707305": {
         "cv_type": "junior",
         "email": "boukhemiamed@gmail.com"
+    },
+    "1719899525": {
+        "cv_type": "junior",
+        "email": "excelzed@gmail.com"
+    },
+    "1797083844": {
+        "cv_type": "junior",
+        "email": "aitabdallah.ikram@gmail.com"
     }
 }

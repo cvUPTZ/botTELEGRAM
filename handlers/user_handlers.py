@@ -5,6 +5,9 @@ from telegram.ext import ContextTypes
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
+from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile
+from config import LINKEDIN_REDIRECT_URI
+
 import json  # Import json for saving data to JSON files
 from config import (
     QUESTIONS_TABLE,
@@ -82,66 +85,23 @@ sent_emails = load_sent_emails()
 
 # Example admin user IDs (replace with your actual admin IDs)
 ADMIN_IDS = {1719899525, 987654321}  # Add your actual admin user IDs here
-#  []
+
+async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}"
+    keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Please click the button below to verify your LinkedIn profile:",
+        reply_markup=reply_markup
+    )
+
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    topic_id = 3137
-    if update.effective_message.message_thread_id != topic_id:
-        await update.effective_message.reply_text('🚫 Cette commande est restreinte au topic CV_UP إحصل على نموذج السيرة')
+    user_id = update.effective_user.id
+    if not is_linkedin_verified(user_id):
+        await start_linkedin_verification(update, context)
         return
-    
-    if not context.args:
-        await send_usage_instructions(update.effective_message)
-        return
-    
-    input_text = ' '.join(context.args)
-    parts = re.split(r'[ ,;:|\t]+', input_text)
-    
-    if len(parts) != 2:
-        await send_usage_instructions(update.effective_message)
-        return
-    
-    email, cv_type = parts
-    
-    # Validate the email format
-    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-        await update.effective_message.reply_text('❌ Format d\'email invalide. Veuillez essayer à nouveau.')
-        return
-    
-    # Check if the cv_type is valid
-    if cv_type.lower() not in ['junior', 'senior']:
-        await update.effective_message.reply_text('❌ Type de CV invalide. Choisissez "junior" ou "senior".')
-        return
-    
-    user_id = update.effective_user.id  # Get the user ID
-    is_admin = user_id in ADMIN_IDS  # Check if the user is an admin
-
-    # If user is not admin, check if they have already requested a CV
-    if not is_admin and user_id in sent_emails:
-        await update.effective_message.reply_text('❌ Vous avez déjà reçu un CV. Vous ne pouvez pas en demander un autre.')
-        return
-    
-    # For admins: Allow multiple CV types for the same user ID
-    if is_admin:
-        # If the admin sends a CV request, we can update or add the CV type and email
-        sent_emails[user_id] = {
-            "cv_type": cv_type.lower(),
-            "email": email
-        }
-    else:
-        # New user: Allow the request and save the CV type
-        sent_emails[user_id] = {
-            "cv_type": cv_type.lower(),
-            "email": email
-        }
-
-    # Send email with the CV
-    result = await send_email_with_cv(email, cv_type.lower(), user_id)
-
-    # Save the updated sent emails to JSON
-    save_sent_emails(sent_emails)
-
-    await update.effective_message.reply_text(result)
 
 async def send_usage_instructions(message):
     await message.reply_text(
