@@ -3,8 +3,7 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from config import EMAIL_ADDRESS, EMAIL_PASSWORD, SMTP_SERVER, SMTP_PORT, CV_FILES, ADMIN_IDS,
-    LINKEDIN_REDIRECT_URI
+from config import EMAIL_ADDRESS, EMAIL_PASSWORD, SMTP_SERVER, SMTP_PORT, CV_FILES, ADMIN_IDS, LINKEDIN_REDIRECT_URI
 from utils.file_utils import load_sent_emails, save_sent_emails
 # from utils.file_utils import load_sent_emails, save_sent_emails
 from utils.linkedin_utils import is_linkedin_verified
