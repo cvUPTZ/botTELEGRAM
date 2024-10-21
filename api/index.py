@@ -94,7 +94,7 @@ def start_linkedin_auth(user_id, cv_type):
     auth_url = (
         f"https://www.linkedin.com/oauth/v2/authorization?response_type=code"
         f"&client_id={LINKEDIN_CLIENT_ID}&redirect_uri={LINKEDIN_REDIRECT_URI}"
-        f"&state={user_id}|{cv_type}&scope=openid%20profile%20email%20r_liteprofile%20r_organization_social"
+        f"&state={user_id}|{cv_type}&scope=openid%20profile%20email"
     )
     return redirect(auth_url)
     
