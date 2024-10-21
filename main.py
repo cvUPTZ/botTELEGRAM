@@ -66,11 +66,6 @@ async def start_linkedin_auth(user_id):
 
 
 
-# @server.route('/start-linkedin-auth/<int:user_id>')
-# async def start_linkedin_auth(user_id):
-#     return f"Starting LinkedIn auth for user {user_id}"
-
-
 @server.route('/linkedin-callback')
 async def linkedin_callback():
     code = request.args.get('code')
