@@ -92,15 +92,16 @@ async def webhook():
     
 #     return "Verification successful! You can close this window and return to the Telegram bot."
 
-
-@app.route('/start-linkedin-auth/<int:user_id>/<cv_type>')
-def start_linkedin_auth(user_id, cv_type):
+@app.route('/start-linkedin-auth/<int:user_id>/<cv_type>/<email>')
+def start_linkedin_auth(user_id, cv_type, email):
+    # Construct the LinkedIn OAuth URL with user_id, cv_type, and email in the state parameter
     auth_url = (
         f"https://www.linkedin.com/oauth/v2/authorization?response_type=code"
         f"&client_id={LINKEDIN_CLIENT_ID}&redirect_uri={LINKEDIN_REDIRECT_URI}"
-        f"&state={user_id}|{cv_type}&scope=openid%20profile%20email"
+        f"&state={user_id}|{cv_type}|{email}&scope=openid%20profile%20email"
     )
     return redirect(auth_url)
+
 
 @app.route('/linkedin-callback')
 async def linkedin_callback():
