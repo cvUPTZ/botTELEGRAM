@@ -100,11 +100,11 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Check if the user is LinkedIn verified
     if not is_linkedin_verified(user_id):
         logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
-        await start_linkedin_verification(update, context, user_id, cv_type)
+        await verify_linkedin(update, context, user_id, cv_type)
         return
     
     try:
-        # Attempt to send the CV based on the user-provided type
+        # User is verified, send the CV
         logger.info(f"Attempting to send CV to {email} for user {user_id}")
         result = await send_email_with_cv(email, cv_type, user_id)
         logger.info(f"CV sending result for user {user_id}: {result}")
@@ -114,23 +114,16 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('❌ Une erreur s\'est produite lors de l\'envoi du CV. Veuillez réessayer plus tard.')
 
 async def start_linkedin_verification(update, context, user_id, cv_type):
-    # Check if the user has already requested a CV
-    sent_emails = load_sent_emails()
-    user_entry = sent_emails.get(str(user_id))
-    
-    if user_entry:
-        # User has already requested a CV, proceed with verification
-        auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
-        keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
-            reply_markup=reply_markup
-        )
-    else:
-        # User has not requested a CV, send an error message
-        await update.message.reply_text("Vous devez d'abord demander un CV avant de pouvoir vérifier votre profil LinkedIn.")
-    
+    # This function will handle the LinkedIn verification process
+    # It should redirect the user to the LinkedIn authorization URL
+    # and then handle the callback to complete the verification
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
+        reply_markup=reply_markup
+    )
 async def send_usage_instructions(message):
     await message.reply_text(
         '❌ Format de commande incorrect. Utilisez :\n'
