@@ -81,31 +81,28 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     logger.info(f"send_cv command received from user {user_id}")
     
-    # Check if the right number of arguments is provided
     if len(context.args) != 2:
         logger.info(f"Incorrect number of arguments provided by user {user_id}. Sending usage instructions.")
         await send_usage_instructions(update.message)
         return
     
-    # Extract the email and CV type from user input
     email, cv_type = context.args
     logger.info(f"User {user_id} requested CV type '{cv_type}' to be sent to {email}")
     
-    # Check if the CV type is valid (either 'junior' or 'senior')
     if cv_type.lower() not in ['junior', 'senior']:
         logger.info(f"Invalid CV type '{cv_type}' requested by user {user_id}")
         await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
         return
     
-    # Check if the user is LinkedIn verified
-    if not is_linkedin_verified(user_id):
+    # Check if the user is an admin
+    is_admin = user_id in ADMIN_IDS
+    
+    if not is_admin and not is_linkedin_verified(user_id):
         logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
-        await verify_linkedin(update, context, user_id, cv_type)
+        await start_linkedin_verification(update, context, user_id, cv_type)
         return
     
     try:
-        # User is verified, send the CV
-        logger.info(f"Attempting to send CV to {email} for user {user_id}")
         result = await send_email_with_cv(email, cv_type, user_id)
         logger.info(f"CV sending result for user {user_id}: {result}")
         await update.message.reply_text(result)
@@ -113,17 +110,6 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error in send_cv for user {user_id}: {str(e)}", exc_info=True)
         await update.message.reply_text('❌ Une erreur s\'est produite lors de l\'envoi du CV. Veuillez réessayer plus tard.')
 
-async def start_linkedin_verification(update, context, user_id, cv_type):
-    # This function will handle the LinkedIn verification process
-    # It should redirect the user to the LinkedIn authorization URL
-    # and then handle the callback to complete the verification
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
-    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
-        reply_markup=reply_markup
-    )
 async def send_usage_instructions(message):
     await message.reply_text(
         '❌ Format de commande incorrect. Utilisez :\n'
@@ -131,6 +117,14 @@ async def send_usage_instructions(message):
         'Exemple : /sendcv email@gmail.com junior'
     )
 
+async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, cv_type: str):
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
+        reply_markup=reply_markup
+    )
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
