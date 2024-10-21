@@ -9,7 +9,7 @@ from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile
 from config import LINKEDIN_REDIRECT_URI
 # from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
-from config import ADMIN_IDS, LINKEDIN_REDIRECT_URI
+from config import ADMIN_USER_IDS, LINKEDIN_REDIRECT_URI
 # from utils.linkedin_utils import is_linkedin_verified
 # from utils.email_utils import send_email_with_cv
 import json  # Import json for saving data to JSON files
@@ -80,7 +80,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 sent_emails = load_sent_emails()
 
-ADMIN_IDS = {1719899525, 987654321}  # Replace with actual admin IDs
+ADMIN_USER_IDS = {1719899525, 987654321}  # Replace with actual admin IDs
 
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -100,7 +100,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     
     # Check if the user is an admin
-    is_admin = user_id in ADMIN_IDS
+    is_admin = user_id in ADMIN_USER_IDS
     
     if not is_admin:
         if not is_linkedin_verified(user_id):
