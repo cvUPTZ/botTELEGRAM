@@ -97,17 +97,31 @@ def start_linkedin_auth(user_id, cv_type):
         f"&state={user_id}|{cv_type}&scope=openid%20profile%20email%20r_liteprofile%20r_organization_social"
     )
     return redirect(auth_url)
+    
 
 @app.route('/linkedin-callback')
 async def linkedin_callback():
+    # Log all request args for debugging
+    print(request.args)
+
     code = request.args.get('code')
     state = request.args.get('state')
-    user_id, cv_type = state.split('|')
-    
+
+    if state is None:
+        return "State parameter is missing", 400  # Return an error if state is None
+
+    try:
+        user_id, cv_type = state.split('|')
+    except ValueError:
+        return "Invalid state format", 400  # Return an error if state format is invalid
+
     # Exchange code for access token
     tokens = await exchange_code_for_tokens(code)
-    access_token = tokens['access_token']
-    
+    access_token = tokens.get('access_token')
+
+    if not access_token:
+        return "Access token not received", 400  # Handle error if access token is not available
+
     # Check if user follows the company page
     if await check_follow_status(access_token, COMPANY_PAGE_ID):
         # User follows the page, send CV
