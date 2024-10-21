@@ -1,6 +1,6 @@
 import re
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
@@ -19,8 +19,8 @@ from config import (
     SCRAPED_DATA_FILE,
 )
 
-
 logger = logging.getLogger(__name__)
+
 def save_sent_emails(sent_emails):
     try:
         with open(SENT_EMAILS_FILE, 'w') as json_file:
@@ -28,13 +28,11 @@ def save_sent_emails(sent_emails):
     except Exception as e:
         logger.error(f"Error saving sent emails to JSON file: {str(e)}")
         
-        
 def load_sent_emails():
     try:
         with open(SENT_EMAILS_FILE, 'r') as json_file:
             return json.load(json_file)
     except FileNotFoundError:
-        # If the file doesn't exist, return an empty dictionary
         return {}
     except json.JSONDecodeError:
         logger.error("Error decoding JSON from the sent emails file")
@@ -76,50 +74,67 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
 
 
-
-# Load sent emails at the beginning of your script
 sent_emails = load_sent_emails()
 
-    
-    
-
-# Example admin user IDs (replace with your actual admin IDs)
-ADMIN_IDS = {1719899525, 987654321}  # Add your actual admin user IDs here
+ADMIN_IDS = {1719899525, 987654321}  # Replace with actual admin IDs
 
 async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}"
-    keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
+    
+    # Check if cv_type is provided as an argument
+    if len(context.args) < 1:
+        await update.message.reply_text('❗ Veuillez fournir le type de CV (junior ou senior).')
+        return
+    
+    cv_type = context.args[0].lower()
+
+    # Validate the CV type
+    if cv_type not in ['junior', 'senior']:
+        await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
+        return
+    
+    # Construct the authentication URL with user_id and cv_type
+    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}"
+    
+    # Create an inline button that directs to the LinkedIn auth page
+    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Send a message with the verification button
     await update.message.reply_text(
-        "Please click the button below to verify your LinkedIn profile:",
+        "Veuillez cliquer sur le bouton ci-dessous pour vérifier votre profil LinkedIn:",
         reply_markup=reply_markup
     )
-
+    
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     logger.info(f"send_cv command received from user {user_id}")
     
+    # Check if the user is LinkedIn verified
     if not is_linkedin_verified(user_id):
         logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
         await start_linkedin_verification(update, context)
         return
     
+    # Check if the right number of arguments is provided
     if len(context.args) != 2:
         logger.info(f"Incorrect number of arguments provided by user {user_id}. Sending usage instructions.")
         await send_usage_instructions(update.message)
         return
     
+    # Extract the email and CV type from user input
     email, cv_type = context.args
     logger.info(f"User {user_id} requested CV type '{cv_type}' to be sent to {email}")
     
+    # Check if the CV type is valid (either 'junior' or 'senior')
     if cv_type.lower() not in ['junior', 'senior']:
         logger.info(f"Invalid CV type '{cv_type}' requested by user {user_id}")
         await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
         return
     
     try:
+        # Attempt to send the CV based on the user-provided type
         logger.info(f"Attempting to send CV to {email} for user {user_id}")
         result = await send_email_with_cv(email, cv_type, user_id)
         logger.info(f"CV sending result for user {user_id}: {result}")
@@ -134,6 +149,8 @@ async def send_usage_instructions(message):
         '/sendcv [email] [junior|senior]\n\n'
         'Exemple : /sendcv email@gmail.com junior'
     )
+
+
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
