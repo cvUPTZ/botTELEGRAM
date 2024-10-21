@@ -47,37 +47,37 @@ async def start_linkedin_verification(update: Update, context: ContextTypes.DEFA
         reply_markup=reply_markup
     )
 
-async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Check if user is verified
-    user_id = update.effective_user.id
-    verified = await asyncio.to_thread(redis_client.exists, f"linkedin_verified:{user_id}")
+# async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     # Check if user is verified
+#     user_id = update.effective_user.id
+#     verified = await asyncio.to_thread(redis_client.exists, f"linkedin_verified:{user_id}")
     
-    if not verified:
-        await update.message.reply_text("Please verify your LinkedIn profile first using /verify_linkedin")
-        return
+#     if not verified:
+#         await update.message.reply_text("Please verify your LinkedIn profile first using /verify_linkedin")
+#         return
     
-    # Handle the question (placeholder implementation)
-    await update.message.reply_text("You asked a question! (This is a placeholder response)")
+#     # Handle the question (placeholder implementation)
+#     await update.message.reply_text("You asked a question! (This is a placeholder response)")
 
-async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Check if user is verified
-    user_id = update.effective_user.id
-    verified = await asyncio.to_thread(redis_client.exists, f"linkedin_verified:{user_id}")
+# async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     # Check if user is verified
+#     user_id = update.effective_user.id
+#     verified = await asyncio.to_thread(redis_client.exists, f"linkedin_verified:{user_id}")
     
-    if not verified:
-        await update.message.reply_text("Please verify your LinkedIn profile first using /verify_linkedin")
-        return
+#     if not verified:
+#         await update.message.reply_text("Please verify your LinkedIn profile first using /verify_linkedin")
+#         return
     
-    # Handle CV sending (placeholder implementation)
-    await update.message.reply_text("CV sending feature is not implemented yet.")
+#     # Handle CV sending (placeholder implementation)
+#     await update.message.reply_text("CV sending feature is not implemented yet.")
 
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"Your Telegram ID is: {user_id}")
+# async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     user_id = update.effective_user.id
+#     await update.message.reply_text(f"Your Telegram ID is: {user_id}")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # General message handler (placeholder implementation)
-    await update.message.reply_text("I received your message, but I'm not sure how to respond.")
+# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     # General message handler (placeholder implementation)
+#     await update.message.reply_text("I received your message, but I'm not sure how to respond.")
 
 # Function to create and initialize the application
 def create_application():
@@ -94,7 +94,7 @@ def create_application():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("question", ask_question))
-    application.add_handler(CommandHandler("liste_questions", liste_questions))
+    # application.add_handler(CommandHandler("liste_questions", liste_questions))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
     application.add_handler(CommandHandler("tagall", tag_all))
