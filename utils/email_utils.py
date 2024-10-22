@@ -6,7 +6,7 @@ from email import encoders
 from config import EMAIL_ADDRESS, EMAIL_PASSWORD, SMTP_SERVER, SMTP_PORT, CV_FILES, ADMIN_USER_IDS , LINKEDIN_REDIRECT_URI
 from utils.file_utils import load_sent_emails, save_sent_emails
 # from utils.file_utils import load_sent_emails, save_sent_emails
-from utils.linkedin_utils import is_linkedin_verified
+# from utils.linkedin_utils import is_linkedin_verified
 
 logger = logging.getLogger(__name__)
 ADMIN_USER_IDS  = [1719899525, 987654321]  # Replace with actual admin Telegram user IDs
