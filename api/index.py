@@ -35,7 +35,6 @@ async def webhook():
 
 @app.route('/start-linkedin-auth/<int:user_id>/<cv_type>/<email>')
 def start_linkedin_auth(user_id, cv_type, email):
-    # Construct the LinkedIn OAuth URL with user_id, cv_type, and email in the state parameter
     auth_url = (
         f"https://www.linkedin.com/oauth/v2/authorization?response_type=code"
         f"&client_id={LINKEDIN_CLIENT_ID}&redirect_uri={LINKEDIN_REDIRECT_URI}"
@@ -43,42 +42,37 @@ def start_linkedin_auth(user_id, cv_type, email):
     )
     return redirect(auth_url)
 
-
 @app.route('/linkedin-callback')
 async def linkedin_callback():
     code = request.args.get('code')
     state = request.args.get('state')
 
-    if state is None:
-        return "State parameter is missing", 400
+    if not code or not state:
+        return "Missing parameters", 400
 
     try:
         user_id, cv_type, email = state.split('|')
-    except ValueError:
-        return "Invalid state format", 400
-
-    tokens = await exchange_code_for_tokens(code)
-    access_token = tokens.get('access_token')
-
-    if not access_token:
-        return "Access token not received", 400
-
-    if await check_follow_status(access_token, COMPANY_PAGE_ID):
-        # User follows the company page, mark as verified
-        redis_client.set(f"linkedin_verified:{user_id}", "true")
+        tokens = await exchange_code_for_tokens(code)
         
-        # Send CV automatically
-        try:
-            result = await send_email_with_cv(email, cv_type, int(user_id))
-            await bot.send_message(chat_id=user_id, text=result)
-        except Exception as e:
-            error_message = f"Une erreur s'est produite lors de l'envoi du CV: {str(e)}"
-            await bot.send_message(chat_id=user_id, text=error_message)
+        if not tokens.get('access_token'):
+            return "Failed to get access token", 400
+
+        verification_status = await verify_linkedin_comment(user_id)
         
-        return "Vérification réussie ! Votre CV a été envoyé. Vous pouvez fermer cette fenêtre et retourner au bot Telegram."
-    else:
-        follow_url = f"https://www.linkedin.com/company/{COMPANY_PAGE_ID}/"
-        return redirect(follow_url)
+        if verification_status:
+            # Mark as verified in Redis
+            redis_client.set(f"linkedin_verified:{user_id}", "true", ex=3600)
+            
+            try:
+                result = await send_email_with_cv(email, cv_type, int(user_id))
+                return "Vérification réussie ! Votre CV a été envoyé. Vous pouvez fermer cette fenêtre et retourner au bot Telegram."
+            except Exception as e:
+                return f"Erreur lors de l'envoi du CV: {str(e)}", 500
+        else:
+            return "Code de vérification non trouvé. Assurez-vous d'avoir commenté avec le bon code.", 400
+
+    except Exception as e:
+        return f"Une erreur s'est produite: {str(e)}", 500
 
 async def exchange_code_for_tokens(code):
     token_url = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -90,8 +84,7 @@ async def exchange_code_for_tokens(code):
         'client_secret': LINKEDIN_CLIENT_SECRET
     }
     response = await asyncio.to_thread(requests.post, token_url, data=data)
-    tokens = response.json()
-    return tokens
+    return response.json()
 
 async def check_linkedin_comment(access_token, post_id, verification_code, user_id):
     # URL for fetching comments from the LinkedIn post
@@ -115,17 +108,32 @@ async def check_linkedin_comment(access_token, post_id, verification_code, user_
 
 
 
-async def verify_comment_on_linkedin(update, context, access_token):
-    user_id = update.effective_user.id
-    verification_code = redis_client.get(f"linkedin_verification_code:{user_id}")
-    post_id = "7254038723820949505"  # Replace with the actual LinkedIn post ID
-    
-    if verification_code and await check_linkedin_comment(access_token, post_id, verification_code, user_id):
-        await update.message.reply_text("Vérification réussie ! Envoi du CV en cours...")
-        await send_email_with_cv(context.args[1], context.args[2], user_id)
-    else:
-        await update.message.reply_text("❌ Vérification échouée. Aucun commentaire valide trouvé ou code incorrect.")
+async def verify_linkedin_comment(user_id):
+    stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+    if not stored_code:
+        return False
 
+    try:
+        comments_url = f"https://api.linkedin.com/v2/socialActions/7254038723820949505/comments"
+        headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}  # Replace with actual token
+        
+        response = await asyncio.to_thread(requests.get, comments_url, headers=headers)
+        
+        if response.status_code == 200:
+            comments = response.json().get('elements', [])
+            
+            for comment in comments:
+                comment_text = comment.get('message', {}).get('text', '')
+                if stored_code in comment_text:
+                    return True
+        
+        return False
+    except Exception as e:
+        print(f"Error verifying comment: {e}")
+        return False
+
+if __name__ == "__main__":
+    app.run(debug=True)
 
 async def verify_linkedin_code(update, context):
     user_id = update.effective_user.id
