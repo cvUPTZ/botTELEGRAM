@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, redirect
 from telegram import Update
 from main import create_application
-from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL,COMPANY_PAGE_ID
+from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL,COMPANY_PAGE_ID, LINKEDIN_ACCESS_TOKEN  # Add this to your config
 import asyncio
 import requests
 from jwt import PyJWKClient
@@ -107,33 +107,47 @@ async def check_linkedin_comment(access_token, post_id, verification_code, user_
     return False
 
 
-
 async def verify_linkedin_comment(user_id):
     stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
     if not stored_code:
+        logger.error(f"No stored verification code found for user {user_id}")
         return False
 
     try:
-        comments_url = f"https://api.linkedin.com/v2/socialActions/7254038723820949505/comments"
-        headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}  # Replace with actual token
+        post_id = "7254038723820949505"  # Your LinkedIn post ID
+        comments_url = f"https://api.linkedin.com/v2/socialActions/{post_id}/comments"
+        headers = {
+            "Authorization": f"Bearer {LINKEDIN_ACCESS_TOKEN}",
+            "X-Restli-Protocol-Version": "2.0.0"
+        }
         
-        response = await asyncio.to_thread(requests.get, comments_url, headers=headers)
+        response = await asyncio.to_thread(
+            requests.get, 
+            comments_url, 
+            headers=headers
+        )
         
         if response.status_code == 200:
             comments = response.json().get('elements', [])
+            logger.info(f"Retrieved {len(comments)} comments from LinkedIn post")
             
             for comment in comments:
-                comment_text = comment.get('message', {}).get('text', '')
+                comment_text = comment.get('message', {}).get('text', '').strip()
                 if stored_code in comment_text:
+                    logger.info(f"Found matching verification code for user {user_id}")
                     return True
-        
-        return False
+                    
+            logger.warning(f"No matching comment found for user {user_id}")
+            return False
+        else:
+            logger.error(f"LinkedIn API error: {response.status_code} - {response.text}")
+            return False
+            
     except Exception as e:
-        print(f"Error verifying comment: {e}")
+        logger.error(f"Error verifying LinkedIn comment: {str(e)}")
         return False
 
-if __name__ == "__main__":
-    app.run(debug=True)
+
 
 async def verify_linkedin_code(update, context):
     user_id = update.effective_user.id
@@ -146,6 +160,13 @@ async def verify_linkedin_code(update, context):
         await send_email_with_cv(context.args[1], context.args[2], user_id)
     else:
         await update.message.reply_text("❌ Code incorrect ou expiré. Veuillez réessayer.")
+
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
 
 # async def check_follow_status(access_token, company_id):
 #     headers = {
