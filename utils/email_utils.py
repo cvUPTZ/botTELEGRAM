@@ -1,10 +1,11 @@
+# utils/email_utils.py
 import smtplib
-import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from typing import Dict, Any
 from datetime import datetime
+import logging
 from config import (
     EMAIL_ADDRESS,
     EMAIL_PASSWORD,
@@ -17,93 +18,34 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-async def check_sent_email(supabase, email: str, user_id: str) -> Dict[str, Any]:
-    """
-    Check if email has been sent before using Supabase
-    
-    Args:
-        supabase: Supabase client
-        email (str): Email to check
-        user_id (str): User ID to check
-        
-    Returns:
-        Dict: Previous sent email entry if found, None otherwise
-    """
-    try:
-        # Check by email
-        response = await supabase.table(SENT_EMAILS_TABLE)\
-            .select('*')\
-            .or_(f'email.eq.{email},user_id.eq.{user_id}')\
-            .execute()
-        
-        if response.data:
-            return response.data[0]
-        return None
-        
-    except Exception as e:
-        logger.error(f"Error checking sent email in Supabase: {str(e)}")
-        raise
-
-async def record_sent_email(supabase, email: str, cv_type: str, user_id: str) -> None:
-    """
-    Record sent email in Supabase
-    
-    Args:
-        supabase: Supabase client
-        email (str): Recipient email
-        cv_type (str): Type of CV sent
-        user_id (str): User ID
-    """
-    try:
-        await supabase.table(SENT_EMAILS_TABLE).insert({
-            "email": email,
-            "cv_type": cv_type,
-            "user_id": user_id,
-            "sent_at": datetime.utcnow().isoformat(),
-        }).execute()
-        
-    except Exception as e:
-        logger.error(f"Error recording sent email in Supabase: {str(e)}")
-        raise
-
 async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -> str:
-    """
-    Send CV via email and track the sending history in Supabase
-    
-    Args:
-        email (str): Recipient email address
-        cv_type (str): Type of CV ('junior' or 'senior')
-        user_id (int): Telegram user ID
-        supabase: Supabase client
-        
-    Returns:
-        str: Success or error message
-    """
-    # Validate CV type
+    """Send CV via email and track sending history"""
     if cv_type.lower() not in CV_FILES:
         return '❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".'
     
-    # Check if user is admin
     is_admin = user_id in ADMIN_USER_IDS
     
     try:
         # Check previous sends for non-admin users
         if not is_admin:
-            previous_send = await check_sent_email(supabase, email, str(user_id))
+            response = await supabase.table(SENT_EMAILS_TABLE)\
+                .select('*')\
+                .or_(f'email.eq.{email},user_id.eq.{user_id}')\
+                .execute()
             
-            if previous_send:
+            if response.data:
+                previous_send = response.data[0]
                 if previous_send['cv_type'] == cv_type:
-                    return f'📩 Vous avez déjà reçu un CV de type {cv_type}. Vous ne pouvez pas en demander un autre du même type.'
+                    return f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
                 else:
-                    return f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}. Vous ne pouvez pas demander un CV de type différent.'
+                    return f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}.'
 
-        # Create email message
+        # Create and send email
         msg = MIMEMultipart()
         msg['From'] = EMAIL_ADDRESS
         msg['To'] = email
         msg['Subject'] = f'{cv_type.capitalize()} CV'
         
-        # Attach CV file
         part = MIMEBase('application', 'octet-stream')
         with open(CV_FILES[cv_type.lower()], 'rb') as file:
             part.set_payload(file.read())
@@ -111,7 +53,6 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
         part.add_header('Content-Disposition', f'attachment; filename={cv_type}_cv.docx')
         msg.attach(part)
         
-        # Send email
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls()
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -119,9 +60,13 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
         
         # Record sent email for non-admin users
         if not is_admin:
-            await record_sent_email(supabase, email, cv_type, str(user_id))
+            await supabase.table(SENT_EMAILS_TABLE).insert({
+                "email": email,
+                "cv_type": cv_type,
+                "user_id": str(user_id),
+                "sent_at": datetime.utcnow().isoformat(),
+            }).execute()
         
-        # Return success message
         return (
             f'✅ Le CV de type {cv_type.capitalize()} a été envoyé à {email}. ✉️\n\n'
             'سعداء جدا باهتمامكم بمبادرة CV_UP ! 🌟\n\n'
