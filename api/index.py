@@ -93,27 +93,73 @@ async def exchange_code_for_tokens(code):
     tokens = response.json()
     return tokens
 
-async def check_follow_status(access_token, company_id):
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "X-Restli-Protocol-Version": "2.0.0"
-    }
-    # LinkedIn API to check if a user follows a company (Make sure to have correct permissions)
-    follow_check_url = f"https://api.linkedin.com/v2/me?projection=(followedCompanies)"
+async def check_linkedin_comment(access_token, post_id, verification_code, user_id):
+    # URL for fetching comments from the LinkedIn post
+    comments_url = f"https://api.linkedin.com/v2/socialActions/{post_id}/comments"
+    headers = {"Authorization": f"Bearer {access_token}"}
 
-    response = await asyncio.to_thread(requests.get, follow_check_url, headers=headers)
-    data = response.json()
-
+    response = await asyncio.to_thread(requests.get, comments_url, headers=headers)
+    
     if response.status_code == 200:
-        # Check if the user follows the specific company
-        followed_companies = data.get('followedCompanies', [])
-        for company in followed_companies:
-            if company['id'] == str(company_id):
+        comments = response.json().get('elements', [])
+        
+        # Check if any comment contains the verification code
+        for comment in comments:
+            actor_id = comment.get('actor', {}).get('id')
+            text = comment.get('message', {}).get('text')
+
+            if verification_code in text and str(actor_id) == str(user_id):
                 return True
-        return False
+
+    return False
+
+
+
+async def verify_comment_on_linkedin(update, context, access_token):
+    user_id = update.effective_user.id
+    verification_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+    post_id = "7254038723820949505"  # Replace with the actual LinkedIn post ID
+    
+    if verification_code and await check_linkedin_comment(access_token, post_id, verification_code, user_id):
+        await update.message.reply_text("Vérification réussie ! Envoi du CV en cours...")
+        await send_email_with_cv(context.args[1], context.args[2], user_id)
     else:
-        logger.error(f"Error checking follow status: {response.status_code}, {response.text}")
-        return False
+        await update.message.reply_text("❌ Vérification échouée. Aucun commentaire valide trouvé ou code incorrect.")
+
+
+async def verify_linkedin_code(update, context):
+    user_id = update.effective_user.id
+    entered_code = context.args[0]
+
+    stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+
+    if stored_code and entered_code == stored_code:
+        await update.message.reply_text("Code vérifié avec succès. Envoi du CV en cours...")
+        await send_email_with_cv(context.args[1], context.args[2], user_id)
+    else:
+        await update.message.reply_text("❌ Code incorrect ou expiré. Veuillez réessayer.")
+
+# async def check_follow_status(access_token, company_id):
+#     headers = {
+#         "Authorization": f"Bearer {access_token}",
+#         "X-Restli-Protocol-Version": "2.0.0"
+#     }
+#     # LinkedIn API to check if a user follows a company (Make sure to have correct permissions)
+#     follow_check_url = f"https://api.linkedin.com/v2/me?projection=(followedCompanies)"
+
+#     response = await asyncio.to_thread(requests.get, follow_check_url, headers=headers)
+#     data = response.json()
+
+#     if response.status_code == 200:
+#         # Check if the user follows the specific company
+#         followed_companies = data.get('followedCompanies', [])
+#         for company in followed_companies:
+#             if company['id'] == str(company_id):
+#                 return True
+#         return False
+#     else:
+#         logger.error(f"Error checking follow status: {response.status_code}, {response.text}")
+#         return False
 
 
 if __name__ == "__main__":
