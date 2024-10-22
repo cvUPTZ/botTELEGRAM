@@ -9,6 +9,74 @@ from utils.linkedin_utils import verify_linkedin_comment
 
 # Logging and Redis setup remains the same...
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Initialize Redis client
+redis_client = redis.from_url(REDIS_URL)
+
+async def load_sent_emails():
+    try:
+        response = await supabase_manager.client.table(SENT_EMAILS_TABLE).select('*').execute()
+        return {str(item['id']): item for item in response.data}
+    except Exception as e:
+        print(f"Error loading sent emails from Supabase: {str(e)}")
+        return {}
+
+async def save_sent_emails(sent_emails):
+    try:
+        for email_id, email_data in sent_emails.items():
+            data_to_insert = {
+                "id": str(email_id),
+                "email": email_data['email'],
+                "status": email_data.get('status', 'sent'),
+                "cv_type": email_data['cv_type']
+            }
+            await supabase_manager.client.table(SENT_EMAILS_TABLE).upsert(data_to_insert).execute()
+    except Exception as e:
+        print(f"Error saving sent emails to Supabase: {str(e)}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f"Start command received from user {update.effective_user.id}")
+    try:
+        await update.message.reply_text(
+            '👋 Bonjour ! Voici les commandes disponibles :\n\n'
+            '/question - Poser une question\n'
+            '/liste_questions - Voir et répondre aux questions (réservé aux administrateurs)\n'
+            '/sendcv - Recevoir un CV (nécessite de suivre notre page LinkedIn)\n'
+            '📄 N\'oubliez pas de suivre notre page LinkedIn avant de demander un CV !'
+        )
+        print("Start message sent successfully")
+    except Exception as e:
+        print(f"Error sending start message: {str(e)}")
+
+async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text('❗ Veuillez fournir votre question.')
+        return
+
+    question_text = ' '.join(context.args)
+    user_id = update.effective_user.id
+
+    try:
+        await supabase_manager.client.table(QUESTIONS_TABLE).insert({
+            "user_id": user_id,
+            "question": question_text,
+            "answered": False,
+            "answer": None
+        }).execute()
+        print(f"Question saved successfully for user {user_id}")
+        await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
+    except Exception as e:
+        print(f"Error saving question to Supabase: {str(e)}")
+        await update.message.reply_text('❌ Une erreur s\'est produite. Veuillez réessayer plus tard.')
+
+
+
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user_id = update.effective_user.id
@@ -138,3 +206,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.edit_text(
             "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
         )
+
+
+async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+
+def setup_handlers(application):
+    """Set up all command handlers"""
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("sendcv", send_cv))
+    application.add_handler(CommandHandler("myid", my_id))
+    application.add_handler(CommandHandler("question", ask_question))
+    application.add_handler(CallbackQueryHandler(callback_handler))
