@@ -30,6 +30,7 @@ from config import (
     QUESTIONS_FILE,  # Add this constant for JSON file paths
     SENT_EMAILS_FILE,
     SCRAPED_DATA_FILE,
+    REDIS_URL
 )
 
 logger = logging.getLogger(__name__)
