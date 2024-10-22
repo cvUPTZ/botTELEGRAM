@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
-from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile
+from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile, verify_linkedin_comment
 from telegram.ext import CommandHandler
 from config import (
     ADMIN_USER_IDS,
@@ -26,7 +26,6 @@ from config import (
     SCRAPED_DATA_FILE,
     REDIS_URL
 )
-from api.index import verify_linkedin_comment
 
 logger = logging.getLogger(__name__)
 redis_client = redis.from_url(REDIS_URL)
