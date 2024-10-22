@@ -152,6 +152,9 @@ async def send_usage_instructions(message):
 #         reply_markup=reply_markup
 #     )
 
+redis_client = redis.from_url(REDIS_URL)
+
+
 
 async def start_linkedin_verification(update, context, user_id, cv_type, email):
     verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
