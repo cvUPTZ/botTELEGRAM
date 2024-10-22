@@ -7,7 +7,6 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from utils.decorators import private_chat_only
 from utils.email_utils import send_email_with_cv
 from utils.linkedin_utils import verify_linkedin_comment
-from utils.file_utils import load_questions, save_questions
 from config import (
     ADMIN_USER_IDS,
     QUESTIONS_TABLE,
@@ -134,7 +133,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Admin bypass for LinkedIn verification
         if user_id in ADMIN_USER_IDS:
             try:
-                result = await send_email_with_cv(email, cv_type, user_id)
+                result = await send_email_with_cv(email, cv_type, user_id, context.bot.supabase)
                 await update.message.reply_text(result)
                 return
             except Exception as e:
@@ -171,35 +170,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle callback queries from inline keyboards"""
-    query = update.callback_query
-    user_id = update.effective_user.id
-    
-    try:
-        await query.answer()
-        
-        # Handle LinkedIn verification callbacks
-        if query.data.startswith("verify_"):
-            await handle_linkedin_verification(query, user_id)
-            return
-            
-        # Handle admin question management callbacks
-        if user_id in ADMIN_USER_IDS:
-            if query.data.startswith("answer_"):
-                await handle_answer_question(query, context)
-                return
-            elif query.data.startswith("delete_"):
-                await handle_delete_question(query, context)
-                return
-        
-        logger.warning(f"Invalid callback data received: {query.data}")
-        
-    except Exception as e:
-        logger.error(f"Error in callback handler: {str(e)}")
-        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer.")
-
-async def handle_linkedin_verification(query, user_id):
+async def handle_linkedin_verification(query, user_id, context):
     """Handle LinkedIn verification process"""
     try:
         # Retrieve stored data from Redis
@@ -237,7 +208,12 @@ async def handle_linkedin_verification(query, user_id):
         await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
         
         try:
-            result = await send_email_with_cv(stored_data['email'], stored_data['cv_type'], user_id)
+            result = await send_email_with_cv(
+                stored_data['email'], 
+                stored_data['cv_type'], 
+                user_id,
+                context.bot.supabase
+            )
             
             # Clean up Redis data
             redis_keys = [
@@ -308,6 +284,34 @@ async def handle_delete_question(query, context):
     except Exception as e:
         logger.error(f"Error deleting question: {str(e)}")
         await query.message.edit_text("❌ Une erreur s'est produite lors de la suppression.")
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries from inline keyboards"""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    
+    try:
+        await query.answer()
+        
+        # Handle LinkedIn verification callbacks
+        if query.data.startswith("verify_"):
+            await handle_linkedin_verification(query, user_id, context)
+            return
+            
+        # Handle admin question management callbacks
+        if user_id in ADMIN_USER_IDS:
+            if query.data.startswith("answer_"):
+                await handle_answer_question(query, context)
+                return
+            elif query.data.startswith("delete_"):
+                await handle_delete_question(query, context)
+                return
+        
+        logger.warning(f"Invalid callback data received: {query.data}")
+        
+    except Exception as e:
+        logger.error(f"Error in callback handler: {str(e)}")
+        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer.")
 
 @private_chat_only
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
