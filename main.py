@@ -1,13 +1,14 @@
+# main.py
 import asyncio
 import logging
 import signal
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id, callback_handler
 from handlers.message_handlers import welcome_new_member, handle_message
-from config import BOT_TOKEN, LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI, REDIS_URL, SUPABASE_URL, SUPABASE_KEY
+from config import BOT_TOKEN, REDIS_URL, SUPABASE_URL, SUPABASE_KEY
 import redis
 from supabase import create_client, Client
 
@@ -18,22 +19,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Redis client
-redis_client = redis.from_url(REDIS_URL)
+class CustomApplication(Application):
+    """Custom Application class with Supabase client"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supabase = None
+        self.redis_client = None
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    @classmethod
+    def builder(cls):
+        """Override builder to return CustomDefaultBuilder"""
+        return CustomDefaultBuilder()
 
-# Global variable to control the bot's running state
-bot_running = True
+class CustomDefaultBuilder(Application.builder().__class__):
+    """Custom builder that creates CustomApplication instances"""
+    def __init__(self):
+        super().__init__()
+        self._application_class = CustomApplication
+        self._supabase = None
+        self._redis_client = None
 
-def signal_handler(sig, frame):
-    global bot_running
-    logger.info("Shutting down gracefully...")
-    bot_running = False
+    def supabase_client(self, client: Client):
+        """Set the Supabase client"""
+        self._supabase = client
+        return self
+
+    def redis_client(self, client: redis.Redis):
+        """Set the Redis client"""
+        self._redis_client = client
+        return self
+
+    def build(self) -> CustomApplication:
+        """Build the custom application with clients"""
+        app = super().build()
+        app.supabase = self._supabase
+        app.redis_client = self._redis_client
+        return app
 
 def create_application():
-    application = Application.builder().token(BOT_TOKEN).build()
+    """Create and configure the application with all handlers"""
+    # Initialize clients
+    redis_client = redis.from_url(REDIS_URL)
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    # Create application with clients
+    application = CustomApplication.builder()\
+        .token(BOT_TOKEN)\
+        .supabase_client(supabase)\
+        .redis_client(redis_client)\
+        .build()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
@@ -43,43 +77,8 @@ def create_application():
     application.add_handler(CommandHandler("myid", my_id))
     application.add_handler(CommandHandler("tagall", tag_all))
     application.add_handler(CommandHandler("offremploi", offremploi))
-
-    # Register callback handler
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
+    
     return application
-
-async def run_telegram_bot():
-    """Run the Telegram bot with graceful shutdown handling"""
-    global bot_running
-    try:
-        application = create_application()
-        await application.initialize()
-        await application.start()
-        
-        # Start polling in a separate task
-        polling_task = asyncio.create_task(
-            application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        )
-        
-        logger.info("Telegram bot started successfully")
-        
-        # Keep the bot running until bot_running is set to False
-        while bot_running:
-            await asyncio.sleep(1)
-            
-        # Proper shutdown
-        logger.info("Stopping Telegram bot...")
-        await polling_task
-        await application.stop()
-        await application.shutdown()
-        
-    except Exception as e:
-        logger.error("Error running Telegram bot", exc_info=True)
-
-if __name__ == '__main__':
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    asyncio.run(run_telegram_bot())
