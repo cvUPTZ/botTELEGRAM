@@ -30,11 +30,12 @@ class SupabaseManager:
             create_tables_sql = """
             -- Create sent_emails table if it doesn't exist
             CREATE TABLE IF NOT EXISTS sent_emails (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Renamed from id to user_id
                 user_id TEXT NOT NULL,
                 email TEXT NOT NULL,
-                status TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'sent', -- Default value for status
                 cv_type TEXT NOT NULL,
+                sent_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()), -- Added sent_at column
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
             );
@@ -86,8 +87,9 @@ class SupabaseManager:
             data = {
                 "user_id": user_id,
                 "email": email,
-                "status": "sent",
+                "status": "sent",  # Status is explicitly set here
                 "cv_type": cv_type,
+                "sent_at": datetime.utcnow().isoformat(),  # Set sent_at when inserting
                 "created_at": datetime.utcnow().isoformat()
             }
             
