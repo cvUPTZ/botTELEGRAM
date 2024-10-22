@@ -184,6 +184,49 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if verification_code != stored_code:
             await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
             return
+        
+        # Show processing message
+        await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
+        
+        # Then verify the LinkedIn comment
+        comment_verified = await verify_linkedin_comment(user_id)
+        if not comment_verified:
+            await query.message.edit_text(
+                "❌ Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code sur la publication LinkedIn."
+            )
+            return
+        
+        # Show processing message
+        await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
+        
+        try:
+            # Send CV
+            result = await send_email_with_cv(email, cv_type, user_id)
+            
+            # Clear Redis data
+            for key in [
+                f"linkedin_verification_code:{user_id}",
+                f"linkedin_email:{user_id}",
+                f"linkedin_cv_type:{user_id}"
+            ]:
+                redis_client.delete(key)
+            
+            await query.message.edit_text(f"✅ Vérification réussie!\n{result}")
+            
+        except Exception as e:
+            logger.error(f"Error sending CV: {str(e)}")
+            await query.message.edit_text(
+                "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer avec /sendcv"
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in callback handler: {str(e)}")
+        try:
+            await query.message.edit_text(
+                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+            )
+        except Exception as nested_e:
+            logger.error(f"Error sending error message: {str(nested_e)}")
 
 async def send_usage_instructions(message):
     await message.reply_text(
