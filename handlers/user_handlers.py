@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 def save_sent_emails(sent_emails):
     try:
+        # Attempt to save to the original file
         with open(SENT_EMAILS_FILE, 'w') as json_file:
             json.dump(sent_emails, json_file, indent=4)
     except Exception as e:
@@ -39,9 +40,16 @@ def save_sent_emails(sent_emails):
         
         # Attempt to save to a temporary location
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
-                json.dump(sent_emails, temp_file)
-                logger.info(f"Sent emails saved to temporary file: {temp_file.name}")
+            # Use NamedTemporaryFile with text mode
+            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json') as temp_file:
+                json.dump(sent_emails, temp_file, indent=4)
+                temp_file_name = temp_file.name  # Get the name of the temporary file
+            
+            logger.info(f"Sent emails saved to temporary file: {temp_file_name}")
+            
+            # Optionally, rename the temporary file to the original filename if needed
+            os.replace(temp_file_name, SENT_EMAILS_FILE)  # Replace the original file with the temp file
+            
         except Exception as temp_error:
             logger.error(f"Error saving sent emails to temporary file: {str(temp_error)}")
 
