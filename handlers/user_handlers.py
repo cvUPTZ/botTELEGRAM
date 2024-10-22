@@ -30,29 +30,23 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-
 def save_sent_emails(sent_emails):
     try:
-        # Attempt to save to the original file
+        # Save to JSON first
         with open(SENT_EMAILS_FILE, 'w') as json_file:
-            json.dump(sent_emails, json_file, indent=4)
-    except Exception as e:
-        logger.error(f"Error saving sent emails to JSON file: {str(e)}")
+            json.dump(sent_emails, json_file)
+
+        # Save to Supabase
+        for email_id, email_data in sent_emails.items():
+            supabase.table(SENT_EMAILS_TABLE).upsert(email_data, on_conflict='id').execute()
+        logger.info("Sent emails saved successfully.")
         
-        # Attempt to save to a temporary location
-        try:
-            # Use NamedTemporaryFile with text mode
-            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json') as temp_file:
-                json.dump(sent_emails, temp_file, indent=4)
-                temp_file_name = temp_file.name  # Get the name of the temporary file
-            
-            logger.info(f"Sent emails saved to temporary file: {temp_file_name}")
-            
-            # Optionally, rename the temporary file to the original filename if needed
-            os.replace(temp_file_name, SENT_EMAILS_FILE)  # Replace the original file with the temp file
-            
-        except Exception as temp_error:
-            logger.error(f"Error saving sent emails to temporary file: {str(temp_error)}")
+    except FileNotFoundError as e:
+        logger.error(f"File not found error when saving sent emails: {str(e)}")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error when saving sent emails: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error saving sent emails: {str(e)}")
 
 def load_sent_emails():
     try:
