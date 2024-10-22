@@ -49,39 +49,20 @@ def save_questions(questions):
 
 def load_sent_emails():
     try:
-        with open(SENT_EMAILS_FILE, 'r') as json_file:
-            return json.load(json_file)
-    except FileNotFoundError:
-        # If the file doesn't exist, return an empty dictionary
-        return {}
-    except json.JSONDecodeError:
-        logger.error("Error decoding JSON from the sent emails file")
-        return {}
+        # Load sent emails from Supabase
+        response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
+        return {str(item['id']): item for item in response.data}
     except Exception as e:
-        logger.error(f"Error loading sent emails from JSON file: {str(e)}")
+        logger.error(f"Error loading sent emails from Supabase: {str(e)}")
         return {}
-
-
-# def load_sent_emails():
-#     try:
-#         response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
-#         return {str(item['id']): item for item in response.data}
-#     except Exception as e:
-#         logger.error(f"Error loading sent emails from Supabase: {str(e)}")
-#         return {}
 
 def save_sent_emails(sent_emails):
     try:
-        # Save to JSON first
-        with open(SENT_EMAILS_FILE, 'w') as json_file:
-            json.dump(sent_emails, json_file)
-
-        # Then save to Supabase
+        # Save to Supabase
         for email_id, email_data in sent_emails.items():
             supabase.table(SENT_EMAILS_TABLE).upsert(email_data, on_conflict='id').execute()
     except Exception as e:
         logger.error(f"Error saving sent emails to Supabase: {str(e)}")
-
 def load_scraped_data():
     try:
         response = supabase.table(SCRAPED_DATA_TABLE).select('*').execute()
