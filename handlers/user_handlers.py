@@ -89,43 +89,55 @@ sent_emails = load_sent_emails()
 
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    logger.info(f"send_cv command received from user {user_id}")
     
     if len(context.args) != 2:
-        logger.info(f"Incorrect number of arguments provided by user {user_id}. Sending usage instructions.")
-        await send_usage_instructions(update.message)
+        await update.message.reply_text(
+            '❌ Format incorrect. Utilisez:\n'
+            '/sendcv [email] [junior|senior]\n'
+            'Exemple: /sendcv email@example.com junior'
+        )
         return
     
     email, cv_type = context.args
-    logger.info(f"User {user_id} requested CV type '{cv_type}' to be sent to {email}")
     
     if cv_type.lower() not in ['junior', 'senior']:
-        logger.info(f"Invalid CV type '{cv_type}' requested by user {user_id}")
-        await update.message.reply_text('❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".')
+        await update.message.reply_text('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
         return
     
     is_admin = user_id in ADMIN_USER_IDS
     
     if not is_admin:
-        if not is_linkedin_verified(user_id):
-            logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
-            await start_linkedin_verification(update, context, user_id, cv_type, email)
-            return
+        # Generate verification code
+        verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
+        redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
+        redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
+
+        linkedin_post_url = "https://www.linkedin.com/feed/update/urn:li:activity:7254038723820949505"
         
+        # Create inline keyboard
+        keyboard = [
+            [InlineKeyboardButton("📝 Voir la publication LinkedIn", url=linkedin_post_url)],
+            [InlineKeyboardButton("✅ J'ai commenté", callback_data=f"verify_{verification_code}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"Pour recevoir votre CV, veuillez:\n\n"
+            f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
+            f"2. Commenter avec ce code: {verification_code}\n"
+            f"3. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
+            f"⚠️ Le code est valide pendant 1 heure",
+            reply_markup=reply_markup
+        )
+        return
+    
+    # Direct CV send for admins
     try:
         result = await send_email_with_cv(email, cv_type, user_id)
-        logger.info(f"CV sending result for user {user_id}: {result}")
         await update.message.reply_text(result)
-        
-        sent_emails[str(user_id)] = {
-            'email': email,
-            'cv_type': cv_type,
-            'status': 'sent'
-        }
-        save_sent_emails(sent_emails)
     except Exception as e:
-        logger.error(f"Error in send_cv for user {user_id}: {str(e)}", exc_info=True)
-        await update.message.reply_text('❌ Une erreur s\'est produite lors de l\'envoi du CV. Veuillez réessayer plus tard.')
+        await update.message.reply_text(f"❌ Erreur: {str(e)}")
 
 async def send_usage_instructions(message):
     await message.reply_text(
@@ -146,13 +158,44 @@ async def start_linkedin_verification(update, context, user_id, cv_type, email):
     
     await update.message.reply_text(message)
 
+
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data.startswith("verify_"):
+        user_id = update.effective_user.id
+        stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+        email = redis_client.get(f"linkedin_email:{user_id}")
+        cv_type = redis_client.get(f"linkedin_cv_type:{user_id}")
+        
+        if not all([stored_code, email, cv_type]):
+            await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
+            return
+        
+        verification_code = query.data.split("_")[1]
+        if verification_code == stored_code:
+            try:
+                result = await send_email_with_cv(email, cv_type, user_id)
+                await query.message.edit_text(f"✅ {result}")
+            except Exception as e:
+                await query.message.edit_text(f"❌ Erreur lors de l'envoi: {str(e)}")
+        else:
+            await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer.")
+
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
 
 def setup_handlers(application):
-    """Set up all command handlers"""
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("question", ask_question))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+
+
+async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+
