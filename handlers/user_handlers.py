@@ -6,6 +6,8 @@ from supabase_config import supabase
 
 import os
 import tempfile  # Make sure to import tempfile at the top
+import redis
+
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
