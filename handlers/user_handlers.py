@@ -4,10 +4,17 @@ import logging
 import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
+from utils.decorators import private_chat_only
 from utils.email_utils import send_email_with_cv
 from utils.linkedin_utils import verify_linkedin_comment
-
-# Logging and Redis setup remains the same...
+from utils.file_utils import load_questions, save_questions
+from config import (
+    ADMIN_USER_IDS,
+    QUESTIONS_TABLE,
+    SENT_EMAILS_TABLE,
+    USERS_TABLE,
+    REDIS_URL
+)
 
 # Configure logging
 logging.basicConfig(
@@ -19,29 +26,10 @@ logger = logging.getLogger(__name__)
 # Initialize Redis client
 redis_client = redis.from_url(REDIS_URL)
 
-async def load_sent_emails():
-    try:
-        response = await supabase_manager.client.table(SENT_EMAILS_TABLE).select('*').execute()
-        return {str(item['id']): item for item in response.data}
-    except Exception as e:
-        print(f"Error loading sent emails from Supabase: {str(e)}")
-        return {}
-
-async def save_sent_emails(sent_emails):
-    try:
-        for email_id, email_data in sent_emails.items():
-            data_to_insert = {
-                "id": str(email_id),
-                "email": email_data['email'],
-                "status": email_data.get('status', 'sent'),
-                "cv_type": email_data['cv_type']
-            }
-            await supabase_manager.client.table(SENT_EMAILS_TABLE).upsert(data_to_insert).execute()
-    except Exception as e:
-        print(f"Error saving sent emails to Supabase: {str(e)}")
-
+@private_chat_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"Start command received from user {update.effective_user.id}")
+    """Handle the /start command"""
+    logger.info(f"Start command received from user {update.effective_user.id}")
     try:
         await update.message.reply_text(
             '👋 Bonjour ! Voici les commandes disponibles :\n\n'
@@ -50,11 +38,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             '/sendcv - Recevoir un CV (nécessite de suivre notre page LinkedIn)\n'
             '📄 N\'oubliez pas de suivre notre page LinkedIn avant de demander un CV !'
         )
-        print("Start message sent successfully")
+        logger.info("Start message sent successfully")
     except Exception as e:
-        print(f"Error sending start message: {str(e)}")
+        logger.error(f"Error sending start message: {str(e)}")
+        await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
+@private_chat_only
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /question command"""
     if not context.args:
         await update.message.reply_text('❗ Veuillez fournir votre question.')
         return
@@ -63,21 +54,65 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
 
     try:
-        await supabase_manager.client.table(QUESTIONS_TABLE).insert({
+        # Store question in Supabase
+        await context.bot.supabase.table(QUESTIONS_TABLE).insert({
             "user_id": user_id,
             "question": question_text,
             "answered": False,
             "answer": None
         }).execute()
-        print(f"Question saved successfully for user {user_id}")
+        
+        logger.info(f"Question saved successfully for user {user_id}")
         await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
+    
     except Exception as e:
-        print(f"Error saving question to Supabase: {str(e)}")
+        logger.error(f"Error saving question to Supabase: {str(e)}")
         await update.message.reply_text('❌ Une erreur s\'est produite. Veuillez réessayer plus tard.')
 
+@private_chat_only
+async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /liste_questions command (admin only)"""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text('❌ Cette commande est réservée aux administrateurs.')
+        return
+        
+    try:
+        # Fetch unanswered questions from Supabase
+        response = await context.bot.supabase.table(QUESTIONS_TABLE)\
+            .select('*')\
+            .eq('answered', False)\
+            .execute()
+        
+        questions = response.data
+        
+        if not questions:
+            await update.message.reply_text('📭 Aucune question en attente.')
+            return
+            
+        for question in questions:
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ Répondre", callback_data=f"answer_{question['id']}"),
+                    InlineKeyboardButton("❌ Supprimer", callback_data=f"delete_{question['id']}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"Question de {question['user_id']}:\n\n"
+                f"{question['question']}",
+                reply_markup=reply_markup
+            )
+            
+    except Exception as e:
+        logger.error(f"Error listing questions: {str(e)}")
+        await update.message.reply_text('❌ Une erreur s\'est produite lors de la récupération des questions.')
 
-
+@private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /sendcv command"""
     try:
         user_id = update.effective_user.id
         
@@ -96,20 +131,21 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
             return
         
+        # Admin bypass for LinkedIn verification
         if user_id in ADMIN_USER_IDS:
             try:
-                # For admin users, send_email_with_cv should be awaited
                 result = await send_email_with_cv(email, cv_type, user_id)
                 await update.message.reply_text(result)
                 return
             except Exception as e:
+                logger.error(f"Error sending CV for admin {user_id}: {str(e)}")
                 await update.message.reply_text(f"❌ Erreur: {str(e)}")
                 return
-
-        # Generate and store verification code for non-admin users
+        
+        # Generate verification code for non-admin users
         verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         
-        # Store data in Redis
+        # Store verification data in Redis
         redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
         redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
         redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
@@ -136,16 +172,36 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries from inline keyboards"""
     query = update.callback_query
     user_id = update.effective_user.id
     
     try:
         await query.answer()
         
-        if not query.data.startswith("verify_"):
-            logger.warning(f"Invalid callback data received: {query.data}")
+        # Handle LinkedIn verification callbacks
+        if query.data.startswith("verify_"):
+            await handle_linkedin_verification(query, user_id)
             return
+            
+        # Handle admin question management callbacks
+        if user_id in ADMIN_USER_IDS:
+            if query.data.startswith("answer_"):
+                await handle_answer_question(query, context)
+                return
+            elif query.data.startswith("delete_"):
+                await handle_delete_question(query, context)
+                return
         
+        logger.warning(f"Invalid callback data received: {query.data}")
+        
+    except Exception as e:
+        logger.error(f"Error in callback handler: {str(e)}")
+        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer.")
+
+async def handle_linkedin_verification(query, user_id):
+    """Handle LinkedIn verification process"""
+    try:
         # Retrieve stored data from Redis
         stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
         stored_email = redis_client.get(f"linkedin_email:{user_id}")
@@ -171,7 +227,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
         
-        # Verify LinkedIn comment
         comment_verified = await verify_linkedin_comment(user_id)
         if not comment_verified:
             await query.message.edit_text(
@@ -182,7 +237,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
         
         try:
-            # Send CV and await the result
             result = await send_email_with_cv(stored_data['email'], stored_data['cv_type'], user_id)
             
             # Clean up Redis data
@@ -196,19 +250,68 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await query.message.edit_text(f"✅ Vérification réussie!\n{result}")
             
         except Exception as e:
-            logger.error(f"Error sending CV for user {user_id}: {str(e)}")
+            logger.error(f"Error sending CV: {str(e)}")
             await query.message.edit_text(
                 "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer avec /sendcv"
             )
             
     except Exception as e:
-        logger.error(f"Error in callback handler for user {user_id}: {str(e)}")
+        logger.error(f"Error in LinkedIn verification: {str(e)}")
         await query.message.edit_text(
             "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
         )
 
+async def handle_answer_question(query, context):
+    """Handle admin answering a question"""
+    question_id = query.data.split("_")[1]
+    
+    try:
+        # Get the question from Supabase
+        response = await context.bot.supabase.table(QUESTIONS_TABLE)\
+            .select('*')\
+            .eq('id', question_id)\
+            .single()\
+            .execute()
+            
+        question = response.data
+        
+        if not question:
+            await query.message.edit_text("❌ Question non trouvée.")
+            return
+            
+        # Store the question ID in user data for the next step
+        context.user_data['answering_question'] = question_id
+        
+        await query.message.edit_text(
+            f"📝 Répondez à cette question:\n\n"
+            f"{question['question']}\n\n"
+            "Envoyez votre réponse dans le prochain message."
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling answer question: {str(e)}")
+        await query.message.edit_text("❌ Une erreur s'est produite.")
 
+async def handle_delete_question(query, context):
+    """Handle admin deleting a question"""
+    question_id = query.data.split("_")[1]
+    
+    try:
+        # Delete the question from Supabase
+        await context.bot.supabase.table(QUESTIONS_TABLE)\
+            .delete()\
+            .eq('id', question_id)\
+            .execute()
+            
+        await query.message.edit_text("✅ Question supprimée.")
+        
+    except Exception as e:
+        logger.error(f"Error deleting question: {str(e)}")
+        await query.message.edit_text("❌ Une erreur s'est produite lors de la suppression.")
+
+@private_chat_only
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /myid command"""
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
 
@@ -218,4 +321,5 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
     application.add_handler(CommandHandler("question", ask_question))
+    application.add_handler(CommandHandler("liste_questions", list_questions))
     application.add_handler(CallbackQueryHandler(callback_handler))
