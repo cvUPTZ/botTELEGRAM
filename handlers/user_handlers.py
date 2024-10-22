@@ -27,13 +27,23 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+import tempfile  # Make sure to import tempfile at the top
+
 def save_sent_emails(sent_emails):
     try:
         with open(SENT_EMAILS_FILE, 'w') as json_file:
-            json.dump(sent_emails, json_file, indent=4)  # Using indent for pretty printing
+            json.dump(sent_emails, json_file, indent=4)
     except Exception as e:
         logger.error(f"Error saving sent emails to JSON file: {str(e)}")
         
+        # Attempt to save to a temporary location
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
+                json.dump(sent_emails, temp_file)
+                logger.info(f"Sent emails saved to temporary file: {temp_file.name}")
+        except Exception as temp_error:
+            logger.error(f"Error saving sent emails to temporary file: {str(temp_error)}")
+
 def load_sent_emails():
     try:
         with open(SENT_EMAILS_FILE, 'r') as json_file:
