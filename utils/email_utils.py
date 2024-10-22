@@ -1,4 +1,3 @@
-# utils/email_utils.py
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -28,10 +27,18 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
     try:
         # Check previous sends for non-admin users
         if not is_admin:
+            # Fixed query using Supabase's filter syntax
             response = await supabase.table(SENT_EMAILS_TABLE)\
                 .select('*')\
-                .or_(f'email.eq.{email},user_id.eq.{user_id}')\
+                .filter('email', 'eq', email)\
                 .execute()
+
+            # Check for user_id separately if no email match found
+            if not response.data:
+                response = await supabase.table(SENT_EMAILS_TABLE)\
+                    .select('*')\
+                    .filter('user_id', 'eq', str(user_id))\
+                    .execute()
             
             if response.data:
                 previous_send = response.data[0]
