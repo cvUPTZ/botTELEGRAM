@@ -2,18 +2,16 @@ import random
 import string
 import re
 import logging
-from supabase_config import supabase
+from supabase_config import supabase_manager
 import os
 import tempfile
 import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler  # Add CallbackQueryHandler
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
 from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile, verify_linkedin_comment
-from telegram.ext import CommandHandler
 from config import (
     ADMIN_USER_IDS,
     LINKEDIN_REDIRECT_URI,
@@ -27,7 +25,7 @@ from config import (
     REDIS_URL
 )
 
-# Configure logging at the module level
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -35,23 +33,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize Redis client
-# redis_client = redis.from_url(REDIS_URL)
-
-
 redis_client = redis.from_url(REDIS_URL)
 
-# from telegram.ext import ContextTypes
-# from config import ADMIN_USER_IDS, REDIS_URL
-# from utils.email_utils import send_email_with_cv
-def load_sent_emails():
+async def load_sent_emails():
     try:
-        response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
+        response = await supabase_manager.client.table(SENT_EMAILS_TABLE).select('*').execute()
         return {str(item['id']): item for item in response.data}
     except Exception as e:
         print(f"Error loading sent emails from Supabase: {str(e)}")
         return {}
 
-def save_sent_emails(sent_emails):
+async def save_sent_emails(sent_emails):
     try:
         for email_id, email_data in sent_emails.items():
             data_to_insert = {
@@ -60,7 +52,7 @@ def save_sent_emails(sent_emails):
                 "status": email_data.get('status', 'sent'),
                 "cv_type": email_data['cv_type']
             }
-            supabase.table(SENT_EMAILS_TABLE).upsert(data_to_insert, on_conflict='id').execute()
+            await supabase_manager.client.table(SENT_EMAILS_TABLE).upsert(data_to_insert).execute()
     except Exception as e:
         print(f"Error saving sent emails to Supabase: {str(e)}")
 
@@ -87,7 +79,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
 
     try:
-        result = supabase.table(QUESTIONS_TABLE).insert({
+        await supabase_manager.client.table(QUESTIONS_TABLE).insert({
             "user_id": user_id,
             "question": question_text,
             "answered": False,
@@ -98,8 +90,6 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         print(f"Error saving question to Supabase: {str(e)}")
         await update.message.reply_text('❌ Une erreur s\'est produite. Veuillez réessayer plus tard.')
-
-sent_emails = load_sent_emails()
 
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
@@ -158,56 +148,39 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         print(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Handle callback queries for LinkedIn verification process.
-    
-    Args:
-        update (Update): The update object from Telegram
-        context (ContextTypes.DEFAULT_TYPE): The context object from Telegram
-    """
     query = update.callback_query
     user_id = update.effective_user.id
     
     try:
-        # Answer the callback query to remove the loading state
         await query.answer()
         
-        # Verify the callback data format
         if not query.data.startswith("verify_"):
             logger.warning(f"Invalid callback data received: {query.data}")
             return
             
-        # Retrieve stored data from Redis
         stored_data = {
             'code': redis_client.get(f"linkedin_verification_code:{user_id}"),
             'email': redis_client.get(f"linkedin_email:{user_id}"),
             'cv_type': redis_client.get(f"linkedin_cv_type:{user_id}")
         }
         
-        # Decode Redis values
         stored_data = {k: v.decode('utf-8') if v else None for k, v in stored_data.items()}
-        
         print(f"Retrieved stored data for user {user_id}: {stored_data}")
         
-        # Check if all required data is present
         if not all(stored_data.values()):
             logger.warning(f"Missing stored data for user {user_id}")
             await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
             return
         
-        # Extract and verify the verification code
         verification_code = query.data.split("_")[1]
         if verification_code != stored_data['code']:
             logger.warning(f"Invalid verification code for user {user_id}")
             await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
             return
         
-        # Update message to show verification status
         await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
         
-        # Verify LinkedIn comment
         comment_verified = await verify_linkedin_comment(user_id)
         if not comment_verified:
             logger.warning(f"LinkedIn comment verification failed for user {user_id}")
@@ -216,15 +189,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             return
         
-        # Show CV sending status
         await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
         
         try:
-            # Send CV
             result = await send_email_with_cv(stored_data['email'], stored_data['cv_type'], user_id)
             print(f"CV sent successfully for user {user_id}")
             
-            # Clean up Redis data
             redis_keys = [
                 f"linkedin_verification_code:{user_id}",
                 f"linkedin_email:{user_id}",
@@ -249,39 +219,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except Exception as nested_e:
             print(f"Error sending error message to user {user_id}: {str(nested_e)}")
 
-async def send_usage_instructions(message):
-    await message.reply_text(
-        '❌ Format de commande incorrect. Utilisez :\n'
-        '/sendcv [email] [junior|senior]\n\n'
-        'Exemple : /sendcv email@gmail.com junior'
-    )
-
-async def start_linkedin_verification(update, context, user_id, cv_type, email):
-    verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    redis_client.set(f"linkedin_verification_code:{user_id}", verification_code, ex=3600)
-
-    linkedin_post_url = "https://www.linkedin.com/feed/update/urn:li:activity:7254038723820949505"
-    message = (
-        f"Pour vérifier votre compte LinkedIn, veuillez commenter le code suivant sur cette publication : {linkedin_post_url}\n"
-        f"Code de vérification: {verification_code}"
-    )
-    
-    await update.message.reply_text(message)
-
-
-
-
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
-
 
 def setup_handlers(application):
     """Set up all command handlers"""
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
-    application.add_handler(CallbackQueryHandler(callback_handler))  # Add this line
-
-
-    application.add_handler(CommandHandler("verify_linkedin", start_linkedin_verification))
+    application.add_handler(CommandHandler("question", ask_question))
+    application.add_handler(CallbackQueryHandler(callback_handler))
