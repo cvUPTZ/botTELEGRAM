@@ -176,7 +176,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         # Verify the callback data format
         if not query.data.startswith("verify_"):
-            # logger.warning(f"Invalid callback data received: {query.data}")
+            logger.warning(f"Invalid callback data received: {query.data}")
             return
             
         # Retrieve stored data from Redis
@@ -189,7 +189,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Decode Redis values
         stored_data = {k: v.decode('utf-8') if v else None for k, v in stored_data.items()}
         
-        # logger.info(f"Retrieved stored data for user {user_id}: {stored_data}")
+        logger.info(f"Retrieved stored data for user {user_id}: {stored_data}")
         
         # Check if all required data is present
         if not all(stored_data.values()):
@@ -200,7 +200,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Extract and verify the verification code
         verification_code = query.data.split("_")[1]
         if verification_code != stored_data['code']:
-            # logger.warning(f"Invalid verification code for user {user_id}")
+            logger.warning(f"Invalid verification code for user {user_id}")
             await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
             return
         
@@ -210,7 +210,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Verify LinkedIn comment
         comment_verified = await verify_linkedin_comment(user_id)
         if not comment_verified:
-            # logger.warning(f"LinkedIn comment verification failed for user {user_id}")
+            logger.warning(f"LinkedIn comment verification failed for user {user_id}")
             await query.message.edit_text(
                 "❌ Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code sur la publication LinkedIn."
             )
@@ -222,7 +222,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             # Send CV
             result = await send_email_with_cv(stored_data['email'], stored_data['cv_type'], user_id)
-            # logger.info(f"CV sent successfully for user {user_id}")
+            logger.info(f"CV sent successfully for user {user_id}")
             
             # Clean up Redis data
             redis_keys = [
@@ -235,19 +235,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await query.message.edit_text(f"✅ Vérification réussie!\n{result}")
             
         except Exception as e:
-            # logger.error(f"Error sending CV for user {user_id}: {str(e)}")
+            logger.error(f"Error sending CV for user {user_id}: {str(e)}")
             await query.message.edit_text(
                 "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer avec /sendcv"
             )
             
     except Exception as e:
-        # logger.error(f"Error in callback handler for user {user_id}: {str(e)}")
+        logger.error(f"Error in callback handler for user {user_id}: {str(e)}")
         try:
             await query.message.edit_text(
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
         except Exception as nested_e:
-            # logger.error(f"Error sending error message to user {user_id}: {str(nested_e)}")
+            logger.error(f"Error sending error message to user {user_id}: {str(nested_e)}")
 
 async def send_usage_instructions(message):
     await message.reply_text(
