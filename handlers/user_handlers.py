@@ -215,6 +215,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except Exception:
             pass
 
+async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+
+
 def setup_handlers(application):
     """Set up all command handlers"""
     application.add_handler(CommandHandler("start", start))
