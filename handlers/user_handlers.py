@@ -251,3 +251,4 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(callback_handler))  # Add this line
 
 
+    application.add_handler(CommandHandler("verify_linkedin", start_linkedin_verification))
