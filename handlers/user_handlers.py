@@ -27,8 +27,16 @@ from config import (
     REDIS_URL
 )
 
+# Configure logging at the module level
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Initialize Redis client
+# redis_client = redis.from_url(REDIS_URL)
+
 
 redis_client = redis.from_url(REDIS_URL)
 
@@ -150,88 +158,96 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle callback queries for LinkedIn verification process.
     
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    Args:
+        update (Update): The update object from Telegram
+        context (ContextTypes.DEFAULT_TYPE): The context object from Telegram
+    """
     query = update.callback_query
+    user_id = update.effective_user.id
     
     try:
+        # Answer the callback query to remove the loading state
         await query.answer()
         
+        # Verify the callback data format
         if not query.data.startswith("verify_"):
+            logger.warning(f"Invalid callback data received: {query.data}")
             return
             
-        user_id = update.effective_user.id
-        stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
-        email = redis_client.get(f"linkedin_email:{user_id}")
-        cv_type = redis_client.get(f"linkedin_cv_type:{user_id}")
+        # Retrieve stored data from Redis
+        stored_data = {
+            'code': redis_client.get(f"linkedin_verification_code:{user_id}"),
+            'email': redis_client.get(f"linkedin_email:{user_id}"),
+            'cv_type': redis_client.get(f"linkedin_cv_type:{user_id}")
+        }
         
-        # Add decoding for Redis values
-        if stored_code:
-            stored_code = stored_code.decode('utf-8')
-        if email:
-            email = email.decode('utf-8')
-        if cv_type:
-            cv_type = cv_type.decode('utf-8')
+        # Decode Redis values
+        stored_data = {k: v.decode('utf-8') if v else None for k, v in stored_data.items()}
         
-        # Add logging to debug
-        logger.info(f"Stored data - Code: {stored_code}, Email: {email}, CV Type: {cv_type}")
-        logger.info(f"Received verification code: {query.data.split('_')[1]}")
+        logger.info(f"Retrieved stored data for user {user_id}: {stored_data}")
         
-        if not all([stored_code, email, cv_type]):
+        # Check if all required data is present
+        if not all(stored_data.values()):
+            logger.warning(f"Missing stored data for user {user_id}")
             await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
             return
         
+        # Extract and verify the verification code
         verification_code = query.data.split("_")[1]
-        
-        # First verify that the code matches
-        if verification_code != stored_code:
+        if verification_code != stored_data['code']:
+            logger.warning(f"Invalid verification code for user {user_id}")
             await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
             return
         
-        # Show processing message
+        # Update message to show verification status
         await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
         
-        # Then verify the LinkedIn comment
+        # Verify LinkedIn comment
         comment_verified = await verify_linkedin_comment(user_id)
         if not comment_verified:
+            logger.warning(f"LinkedIn comment verification failed for user {user_id}")
             await query.message.edit_text(
                 "❌ Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code sur la publication LinkedIn."
             )
             return
         
-        # Show processing message
+        # Show CV sending status
         await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
         
         try:
             # Send CV
-            result = await send_email_with_cv(email, cv_type, user_id)
+            result = await send_email_with_cv(stored_data['email'], stored_data['cv_type'], user_id)
+            logger.info(f"CV sent successfully for user {user_id}")
             
-            # Clear Redis data
-            for key in [
+            # Clean up Redis data
+            redis_keys = [
                 f"linkedin_verification_code:{user_id}",
                 f"linkedin_email:{user_id}",
                 f"linkedin_cv_type:{user_id}"
-            ]:
-                redis_client.delete(key)
+            ]
+            redis_client.delete(*redis_keys)
             
             await query.message.edit_text(f"✅ Vérification réussie!\n{result}")
             
         except Exception as e:
-            logger.error(f"Error sending CV: {str(e)}")
+            logger.error(f"Error sending CV for user {user_id}: {str(e)}")
             await query.message.edit_text(
                 "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer avec /sendcv"
             )
             
     except Exception as e:
-        logger.error(f"Error in callback handler: {str(e)}")
+        logger.error(f"Error in callback handler for user {user_id}: {str(e)}")
         try:
             await query.message.edit_text(
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
         except Exception as nested_e:
-            logger.error(f"Error sending error message: {str(nested_e)}")
+            logger.error(f"Error sending error message to user {user_id}: {str(nested_e)}")
 
 async def send_usage_instructions(message):
     await message.reply_text(
