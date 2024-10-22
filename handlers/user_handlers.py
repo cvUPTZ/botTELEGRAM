@@ -131,15 +131,28 @@ async def send_usage_instructions(message):
         'Exemple : /sendcv email@gmail.com junior'
     )
 
-async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, cv_type: str, email: str):
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}/{email}"
-    keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Pour recevoir votre CV, veuillez d'abord vérifier votre profil LinkedIn. "
-        "Cliquez sur le bouton ci-dessous pour commencer la vérification:",
-        reply_markup=reply_markup
+# async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, cv_type: str, email: str):
+#     auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}/{cv_type}/{email}"
+#     keyboard = [[InlineKeyboardButton("Vérifiez avec LinkedIn", url=auth_url)]]
+#     reply_markup = InlineKeyboardMarkup(keyboard)
+#     await update.message.reply_text(
+#         "Pour recevoir votre CV, veuillez d'abord vérifier votre profil LinkedIn. "
+#         "Cliquez sur le bouton ci-dessous pour commencer la vérification:",
+#         reply_markup=reply_markup
+#     )
+
+
+async def start_linkedin_verification(update, context, user_id, cv_type, email):
+    verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    redis_client.set(f"linkedin_verification_code:{user_id}", verification_code, ex=3600)  # Save the code in Redis with a 1-hour expiry
+
+    linkedin_post_url = f"https://www.linkedin.com/feed/update/YOUR_PUBLICATION_ID"  # Replace with the actual LinkedIn post URL
+    message = (
+        f"Pour vérifier votre compte LinkedIn, veuillez commenter le code suivant sur cette publication : {linkedin_post_url}\n"
+        f"Code de vérification: {verification_code}"
     )
+    
+    await update.message.reply_text(message)
 
 # def setup_send_cv_handler(application):
 #     application.add_handler(CommandHandler("sendcv", send_cv))
