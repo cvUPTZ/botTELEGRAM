@@ -2,6 +2,7 @@ import random
 import string
 import re
 import logging
+import os
 import tempfile  # Make sure to import tempfile at the top
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
