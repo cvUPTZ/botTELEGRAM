@@ -52,28 +52,30 @@ def create_application():
     return application
 
 async def run_telegram_bot():
+    """Run the Telegram bot with graceful shutdown handling"""
     global bot_running
     try:
         application = create_application()
         await application.initialize()
         await application.start()
-
+        
         # Start polling in a separate task
         polling_task = asyncio.create_task(
             application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         )
+        
         logger.info("Telegram bot started successfully")
-
+        
         # Keep the bot running until bot_running is set to False
         while bot_running:
             await asyncio.sleep(1)
-
+            
         # Proper shutdown
         logger.info("Stopping Telegram bot...")
         await polling_task
         await application.stop()
         await application.shutdown()
-
+        
     except Exception as e:
         logger.error("Error running Telegram bot", exc_info=True)
 
