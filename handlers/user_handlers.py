@@ -1,3 +1,5 @@
+import random
+import string
 import re
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
