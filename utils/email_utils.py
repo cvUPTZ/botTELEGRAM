@@ -27,15 +27,14 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
     try:
         # Check previous sends for non-admin users
         if not is_admin:
-            # Fixed query using Supabase's filter syntax
-            response = await supabase.table(SENT_EMAILS_TABLE)\
+            # Execute queries without await
+            response = supabase.table(SENT_EMAILS_TABLE)\
                 .select('*')\
                 .filter('email', 'eq', email)\
                 .execute()
 
-            # Check for user_id separately if no email match found
             if not response.data:
-                response = await supabase.table(SENT_EMAILS_TABLE)\
+                response = supabase.table(SENT_EMAILS_TABLE)\
                     .select('*')\
                     .filter('user_id', 'eq', str(user_id))\
                     .execute()
@@ -65,9 +64,9 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.sendmail(EMAIL_ADDRESS, email, msg.as_string())
         
-        # Record sent email for non-admin users
+        # Record sent email for non-admin users without await
         if not is_admin:
-            await supabase.table(SENT_EMAILS_TABLE).insert({
+            supabase.table(SENT_EMAILS_TABLE).insert({
                 "email": email,
                 "cv_type": cv_type,
                 "user_id": str(user_id),
