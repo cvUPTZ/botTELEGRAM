@@ -3,7 +3,7 @@
 import json
 import redis
 from config import REDIS_URL, LINKEDIN_ACCESS_TOKEN
-
+import asyncio
 redis_client = redis.from_url(REDIS_URL)
 
 
