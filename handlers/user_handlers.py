@@ -158,14 +158,9 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle callback queries for LinkedIn verification process.
-    
-    Args:
-        update (Update): The update object from Telegram
-        context (ContextTypes.DEFAULT_TYPE): The context object from Telegram
     """
     query = update.callback_query
     user_id = update.effective_user.id
