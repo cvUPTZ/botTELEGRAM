@@ -107,13 +107,17 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Check if the user is an admin
     is_admin = user_id in ADMIN_USER_IDS
     
-    if not is_linkedin_verified(user_id):
+    # if not is_linkedin_verified(user_id):
             
-        logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
-        await start_linkedin_verification(update, context, user_id, cv_type, email)
-        return
-
-    
+    #     logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
+    #     await start_linkedin_verification(update, context, user_id, cv_type, email)
+    #     return
+    if not is_admin:
+        if not is_linkedin_verified(user_id):
+            logger.info(f"User {user_id} is not LinkedIn verified. Starting verification process.")
+            await start_linkedin_verification(update, context, user_id, cv_type, email)
+            return
+        
     # Proceed with sending the CV if the user is an admin or LinkedIn verified
     try:
         result = await send_email_with_cv(email, cv_type, user_id)
