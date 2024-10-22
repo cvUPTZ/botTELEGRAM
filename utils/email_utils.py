@@ -1,10 +1,10 @@
 import smtplib
 import logging
-import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from typing import Dict, Any
+from datetime import datetime
 from config import (
     EMAIL_ADDRESS,
     EMAIL_PASSWORD,
@@ -12,38 +12,69 @@ from config import (
     SMTP_PORT,
     CV_FILES,
     ADMIN_USER_IDS,
-    SENT_EMAILS_FILE
+    SENT_EMAILS_TABLE
 )
 
 logger = logging.getLogger(__name__)
 
-async def load_sent_emails() -> Dict[str, Any]:
-    """Load the sent emails history from JSON file"""
-    try:
-        with open(SENT_EMAILS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        logger.error(f"Error loading sent emails: {str(e)}")
-        return {}
-
-async def save_sent_emails(sent_emails: Dict[str, Any]) -> None:
-    """Save the sent emails history to JSON file"""
-    try:
-        with open(SENT_EMAILS_FILE, 'w') as f:
-            json.dump(sent_emails, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving sent emails: {str(e)}")
-
-async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
+async def check_sent_email(supabase, email: str, user_id: str) -> Dict[str, Any]:
     """
-    Send CV via email and track the sending history
+    Check if email has been sent before using Supabase
+    
+    Args:
+        supabase: Supabase client
+        email (str): Email to check
+        user_id (str): User ID to check
+        
+    Returns:
+        Dict: Previous sent email entry if found, None otherwise
+    """
+    try:
+        # Check by email
+        response = await supabase.table(SENT_EMAILS_TABLE)\
+            .select('*')\
+            .or_(f'email.eq.{email},user_id.eq.{user_id}')\
+            .execute()
+        
+        if response.data:
+            return response.data[0]
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking sent email in Supabase: {str(e)}")
+        raise
+
+async def record_sent_email(supabase, email: str, cv_type: str, user_id: str) -> None:
+    """
+    Record sent email in Supabase
+    
+    Args:
+        supabase: Supabase client
+        email (str): Recipient email
+        cv_type (str): Type of CV sent
+        user_id (str): User ID
+    """
+    try:
+        await supabase.table(SENT_EMAILS_TABLE).insert({
+            "email": email,
+            "cv_type": cv_type,
+            "user_id": user_id,
+            "sent_at": datetime.utcnow().isoformat(),
+        }).execute()
+        
+    except Exception as e:
+        logger.error(f"Error recording sent email in Supabase: {str(e)}")
+        raise
+
+async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -> str:
+    """
+    Send CV via email and track the sending history in Supabase
     
     Args:
         email (str): Recipient email address
         cv_type (str): Type of CV ('junior' or 'senior')
         user_id (int): Telegram user ID
+        supabase: Supabase client
         
     Returns:
         str: Success or error message
@@ -52,23 +83,20 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
     if cv_type.lower() not in CV_FILES:
         return '❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".'
     
-    # Load sent emails history
-    sent_emails = await load_sent_emails()
-    
     # Check if user is admin
     is_admin = user_id in ADMIN_USER_IDS
     
-    # Check previous sends for non-admin users
-    if not is_admin:
-        user_entry = sent_emails.get(email) or sent_emails.get(str(user_id))
-        
-        if user_entry:
-            if user_entry['cv_type'] == cv_type:
-                return f'📩 Vous avez déjà reçu un CV de type {cv_type}. Vous ne pouvez pas en demander un autre du même type.'
-            else:
-                return f'📩 Vous avez déjà reçu un CV de type {user_entry["cv_type"]}. Vous ne pouvez pas demander un CV de type différent.'
-
     try:
+        # Check previous sends for non-admin users
+        if not is_admin:
+            previous_send = await check_sent_email(supabase, email, str(user_id))
+            
+            if previous_send:
+                if previous_send['cv_type'] == cv_type:
+                    return f'📩 Vous avez déjà reçu un CV de type {cv_type}. Vous ne pouvez pas en demander un autre du même type.'
+                else:
+                    return f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}. Vous ne pouvez pas demander un CV de type différent.'
+
         # Create email message
         msg = MIMEMultipart()
         msg['From'] = EMAIL_ADDRESS
@@ -89,16 +117,9 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.sendmail(EMAIL_ADDRESS, email, msg.as_string())
         
-        # Update sent emails history for non-admin users
+        # Record sent email for non-admin users
         if not is_admin:
-            user_data = {
-                'cv_type': cv_type,
-                'email': email,
-                'user_id': str(user_id)
-            }
-            sent_emails[email] = user_data
-            sent_emails[str(user_id)] = user_data
-            await save_sent_emails(sent_emails)
+            await record_sent_email(supabase, email, cv_type, str(user_id))
         
         # Return success message
         return (
