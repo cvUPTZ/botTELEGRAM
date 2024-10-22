@@ -45,13 +45,14 @@ def insert_question(user_id, question_text):
     except Exception as e:
         print(f"Error inserting question: {e}")
 
-def insert_sent_email(email, status):
+def insert_sent_email(email, status, cv_type):
     """Insert a sent email record into the sent_emails table."""
     try:
         result = supabase.table('sent_emails').insert({
             "id": str(email),  # You can customize the 'id' field as needed
             "email": email,
-            "status": status
+            "status": status,
+            "cv_type": cv_type  # Add cv_type to the insert
         }).execute()
         print(f"Inserted sent email: {result.data}")
     except Exception as e:
@@ -63,7 +64,7 @@ if __name__ == "__main__":
     check_sent_emails_table()
 
     # Example insertions (you can customize or remove this part)
-    insert_question(user_id=123, question_text="What is Supabase?")
-    insert_sent_email(email="example@example.com", status="sent")
+    # insert_question(user_id=123, question_text="What is Supabase?")
+    # insert_sent_email(email="example@example.com", status="sent", cv_type="junior")  # Include cv_type
 
     print("Table operations completed.")
