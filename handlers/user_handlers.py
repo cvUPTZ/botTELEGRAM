@@ -110,6 +110,8 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_admin:
         # Generate verification code
         verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        
+        # Store in Redis with expiration
         redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
         redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
         redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
