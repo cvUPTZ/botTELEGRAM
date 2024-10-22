@@ -10,3 +10,5 @@ hypercorn==0.15.0
 supabase==1.0.3
 PyJWT
 redis
+selenium==4.16.0
+webdriver-manager==4.0.1
