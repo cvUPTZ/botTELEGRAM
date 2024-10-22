@@ -3,7 +3,7 @@ import logging
 import signal
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
 from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
@@ -80,6 +80,8 @@ def create_application():
     application.add_handler(CommandHandler("tagall", tag_all))
     application.add_handler(CommandHandler("offremploi", offremploi))
     application.add_handler(CommandHandler("verify_linkedin", start_linkedin_verification))
+    application.add_handler(CallbackQueryHandler(callback_handler))  # Added callback handler
+
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
