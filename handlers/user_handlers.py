@@ -30,36 +30,22 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+def load_sent_emails():
+    try:
+        # Load sent emails from Supabase
+        response = supabase.table(SENT_EMAILS_TABLE).select('*').execute()
+        return {str(item['id']): item for item in response.data}
+    except Exception as e:
+        logger.error(f"Error loading sent emails from Supabase: {str(e)}")
+        return {}
+
 def save_sent_emails(sent_emails):
     try:
-        # Save to JSON first
-        with open(SENT_EMAILS_FILE, 'w') as json_file:
-            json.dump(sent_emails, json_file)
-
         # Save to Supabase
         for email_id, email_data in sent_emails.items():
             supabase.table(SENT_EMAILS_TABLE).upsert(email_data, on_conflict='id').execute()
-        logger.info("Sent emails saved successfully.")
-        
-    except FileNotFoundError as e:
-        logger.error(f"File not found error when saving sent emails: {str(e)}")
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error when saving sent emails: {str(e)}")
     except Exception as e:
-        logger.error(f"Error saving sent emails: {str(e)}")
-
-def load_sent_emails():
-    try:
-        with open(SENT_EMAILS_FILE, 'r') as json_file:
-            return json.load(json_file)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        logger.error("Error decoding JSON from the sent emails file")
-        return {}
-    except Exception as e:
-        logger.error(f"Error loading sent emails from JSON file: {str(e)}")
-        return {}
+        logger.error(f"Error saving sent emails to Supabase: {str(e)}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Start command received from user {update.effective_user.id}")
