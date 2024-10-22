@@ -165,11 +165,13 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             f"Pour recevoir votre CV, veuillez:\n\n"
             f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
-            f"2. Commenter avec ce code: {verification_code}\n"
-            f"3. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
+            f"2. Cliquez sur le bouton 'Suivre' pour rester à jour.\n"  # Modified line
+            f"3. Commenter avec ce code: {verification_code}\n"
+            f"4. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
             f"⚠️ Le code est valide pendant 1 heure",
             reply_markup=reply_markup
         )
+
         
     except Exception as e:
         logger.error(f"Error in send_cv command: {str(e)}")
