@@ -160,7 +160,7 @@ async def start_linkedin_verification(update, context, user_id, cv_type, email):
     verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
     redis_client.set(f"linkedin_verification_code:{user_id}", verification_code, ex=3600)  # Save the code in Redis with a 1-hour expiry
 
-    linkedin_post_url = f"https://www.linkedin.com/feed/update/YOUR_PUBLICATION_ID"  # Replace with the actual LinkedIn post URL
+    linkedin_post_url = f"https://www.linkedin.com/feed/update/urn:li:activity:7254038723820949505"  # Replace with the actual LinkedIn post URL
     message = (
         f"Pour vérifier votre compte LinkedIn, veuillez commenter le code suivant sur cette publication : {linkedin_post_url}\n"
         f"Code de vérification: {verification_code}"
