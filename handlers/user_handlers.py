@@ -151,6 +151,9 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     query = update.callback_query
     
     try:
