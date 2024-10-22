@@ -7,6 +7,7 @@ import os
 import tempfile
 import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler  # Add CallbackQueryHandler
 from telegram.ext import ContextTypes
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
@@ -162,37 +163,63 @@ async def start_linkedin_verification(update, context, user_id, cv_type, email):
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     
-    if query.data.startswith("verify_"):
+    try:
+        await query.answer()  # Always answer the callback query first
+        
+        if not query.data.startswith("verify_"):
+            return
+            
         user_id = update.effective_user.id
         stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
         email = redis_client.get(f"linkedin_email:{user_id}")
         cv_type = redis_client.get(f"linkedin_cv_type:{user_id}")
         
         if not all([stored_code, email, cv_type]):
-            await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
+            await query.message.edit_text(
+                "❌ Session expirée. Veuillez recommencer avec /sendcv"
+            )
             return
         
         verification_code = query.data.split("_")[1]
+        
         if verification_code == stored_code:
             try:
+                # Send CV
                 result = await send_email_with_cv(email, cv_type, user_id)
-                await query.message.edit_text(f"✅ {result}")
+                
+                # Clear Redis data
+                redis_client.delete(f"linkedin_verification_code:{user_id}")
+                redis_client.delete(f"linkedin_email:{user_id}")
+                redis_client.delete(f"linkedin_cv_type:{user_id}")
+                
+                await query.message.edit_text(
+                    f"✅ Vérification réussie!\n{result}"
+                )
             except Exception as e:
-                await query.message.edit_text(f"❌ Erreur lors de l'envoi: {str(e)}")
+                logger.error(f"Error sending CV: {str(e)}")
+                await query.message.edit_text(
+                    "❌ Une erreur s'est produite lors de l'envoi du CV. "
+                    "Veuillez réessayer avec /sendcv"
+                )
         else:
-            await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer.")
-
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+            await query.message.edit_text(
+                "❌ Code de vérification invalide. Veuillez réessayer avec /sendcv"
+            )
+    except Exception as e:
+        logger.error(f"Error in callback handler: {str(e)}")
+        try:
+            await query.message.edit_text(
+                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+            )
+        except Exception:
+            pass
 
 def setup_handlers(application):
+    """Set up all command handlers"""
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
-    application.add_handler(CallbackQueryHandler(callback_handler))
-
+    application.add_handler(CallbackQueryHandler(callback_handler))  # Add this line
 
 
