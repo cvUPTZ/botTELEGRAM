@@ -2,6 +2,8 @@ import random
 import string
 import re
 import logging
+from supabase_config import supabase
+
 import os
 import tempfile  # Make sure to import tempfile at the top
 
