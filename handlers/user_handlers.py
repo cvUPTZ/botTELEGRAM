@@ -2,6 +2,8 @@ import random
 import string
 import re
 import logging
+import tempfile  # Make sure to import tempfile at the top
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from utils.decorators import private_chat_only
@@ -27,7 +29,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-import tempfile  # Make sure to import tempfile at the top
 
 def save_sent_emails(sent_emails):
     try:
