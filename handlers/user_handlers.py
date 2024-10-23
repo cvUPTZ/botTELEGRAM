@@ -109,7 +109,8 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Error listing questions: {str(e)}")
         await update.message.reply_text('❌ Une erreur s\'est produite lors de la récupération des questions.')
-        @private_chat_only
+        
+@private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /sendcv command"""
     try:
