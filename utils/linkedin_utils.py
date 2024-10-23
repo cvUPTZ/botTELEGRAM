@@ -106,6 +106,10 @@ class TokenManager:
 token_manager = TokenManager()
 
 async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
+    """
+    Verify if a user has commented on the LinkedIn post with their verification code
+    Returns tuple of (success, message)
+    """
     stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
     
     if not stored_code:
@@ -135,35 +139,43 @@ async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
             timeout=10
         )
         
+        if response.status_code == 401:
+            logger.error("LinkedIn token expired")
+            return False, "Erreur d'authentification LinkedIn. Veuillez réessayer plus tard."
+            
         response.raise_for_status()
         comments = response.json().get('elements', [])
         
-        # Add timestamp check to ensure comment was made after code generation
-        code_generation_time = redis_client.get(f"linkedin_code_timestamp:{user_id}")
-        if not code_generation_time:
+        if not comments:
+            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+
+        # Get timestamp when code was generated
+        code_timestamp = redis_client.get(f"linkedin_code_timestamp:{user_id}")
+        if not code_timestamp:
             return False, "Session expirée. Veuillez recommencer."
             
-        code_generation_time = float(code_generation_time)
+        code_timestamp = float(code_timestamp.decode('utf-8'))
         
+        # Look for the exact code in comments
         code_found = False
         for comment in comments:
             comment_text = comment.get('message', {}).get('text', '').strip()
-            comment_time = comment.get('created', {}).get('time', 0) / 1000  # Convert to seconds
+            comment_time = int(comment.get('created', {}).get('time', 0)) / 1000  # Convert to seconds
             
-            if stored_code in comment_text:
-                if comment_time < code_generation_time:
-                    return False, "Le commentaire a été fait avant la génération du code. Veuillez recommencer."
+            if stored_code == comment_text:  # Exact match only
+                if comment_time < code_timestamp:
+                    continue  # Skip comments made before code generation
                 code_found = True
                 break
-                
+        
         if not code_found:
-            return False, "Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code."
-            
+            return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+        
         return True, "Vérification réussie!"
         
     except Exception as e:
         logger.error(f"Error verifying LinkedIn comment: {str(e)}", exc_info=True)
-        return False, "Une erreur est survenue. Veuillez réessayer plus tard."
+        return False, "Une erreur est survenue lors de la vérification. Veuillez réessayer plus tard."
 
 def is_linkedin_verified(user_id: str) -> bool:
     """Check if a user has completed LinkedIn verification"""
