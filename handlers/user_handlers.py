@@ -5,6 +5,7 @@ import string
 import logging
 import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from utils.decorators import private_chat_only
 from utils.email_utils import send_email_with_cv
