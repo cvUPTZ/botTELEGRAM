@@ -175,6 +175,19 @@ async def handle_linkedin_callback(code: str, state: str) -> Dict[str, str]:
             'status': 'error',
             'message': str(e)
         }
+
+async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
+    """
+    Verify if a user has commented on the LinkedIn post with their verification code
+    """
+    try:
+        stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+        if not stored_code:
+            return False, "Code de vérification non trouvé. Veuillez recommencer."
+            
+        stored_code = stored_code.decode('utf-8') if isinstance(stored_code, bytes) else stored_code
+
+
 def is_linkedin_verified(user_id: str) -> bool:
     """Check if a user has completed LinkedIn verification"""
     verified_data = redis_client.get(f"linkedin_verified:{user_id}")
