@@ -108,6 +108,7 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Error listing questions: {str(e)}")
         await update.message.reply_text('❌ Une erreur s\'est produite lors de la récupération des questions.')
+        
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /sendcv command"""
@@ -144,16 +145,35 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.error(f"Error sending CV for admin {user_id}: {str(e)}")
                 await update.message.reply_text(f"❌ Erreur: {str(e)}")
                 return
-        
-        # Generate verification code
+
+        # Generate verification code with timestamp
         verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        current_time = time.time()
         
-        # Store verification data in Redis
-        redis_client = context.application.redis_client
+        # Store verification data in Redis with timestamp
         redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
+        redis_client.setex(f"linkedin_code_timestamp:{user_id}", 3600, str(current_time))
         redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
         redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
+        
+        # Check if user has already received a CV in the past
+        try:
+            response = await context.application.supabase.table(SENT_EMAILS_TABLE)\
+                .select('*')\
+                .filter('email', 'eq', email)\
+                .execute()
 
+            if response.data:
+                previous_send = response.data[0]
+                if previous_send['cv_type'] == cv_type:
+                    await update.message.reply_text(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
+                    return
+                else:
+                    await update.message.reply_text(f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}.')
+                    return
+        except Exception as e:
+            logger.error(f"Error checking previous CV sends: {str(e)}")
+        
         linkedin_post_url = "https://www.linkedin.com/feed/update/urn:li:activity:7254038723820949505"
         
         keyboard = [
@@ -163,15 +183,18 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"Pour recevoir votre CV, veuillez:\n\n"
+            f"Pour recevoir votre CV, veuillez suivre ces étapes dans l'ordre :\n\n"
             f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
-            f"2. Cliquez sur le bouton 'Suivre' pour rester à jour.\n"  # Modified line
-            f"3. Commenter avec ce code: {verification_code}\n"
+            f"2. Suivre notre page LinkedIn\n"
+            f"3. Commenter avec exactement ce code : {verification_code}\n"
             f"4. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
-            f"⚠️ Le code est valide pendant 1 heure",
+            f"⚠️ Important:\n"
+            f"- Le code est valide pendant 1 heure\n"
+            f"- Vous devez suivre les étapes dans l'ordre\n"
+            f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
+            f"- Un seul CV par adresse email",
             reply_markup=reply_markup
         )
-
         
     except Exception as e:
         logger.error(f"Error in send_cv command: {str(e)}")
