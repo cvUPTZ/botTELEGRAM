@@ -263,91 +263,91 @@ async def get_valid_token(self) -> Optional[str]:
             logger.error(f"Error in get_valid_token: {str(e)}")
             return None
 
-    async def handle_missing_token(self) -> Optional[str]:
-        """
-        Handle cases where no valid token exists
-        """
-        # Store flag indicating authentication is needed
-        self.redis_client.setex('linkedin_auth_needed', 300, '1')
-        return None
+async def handle_missing_token(self) -> Optional[str]:
+    """
+    Handle cases where no valid token exists
+    """
+    # Store flag indicating authentication is needed
+    self.redis_client.setex('linkedin_auth_needed', 300, '1')
+    return None
 
-    async def verify_linkedin_comment(self, user_id: str) -> Tuple[bool, str]:
-        """
-        Verify if a user has commented on the LinkedIn post with their verification code.
-        """
-        try:
-            # Retrieve the stored verification code
-            stored_code = self.redis_client.get(f"linkedin_verification_code:{user_id}")
-            if not stored_code:
-                return False, "Code de vérification non trouvé. Veuillez recommencer."
+async def verify_linkedin_comment(self, user_id: str) -> Tuple[bool, str]:
+    """
+    Verify if a user has commented on the LinkedIn post with their verification code.
+    """
+    try:
+        # Retrieve the stored verification code
+        stored_code = self.redis_client.get(f"linkedin_verification_code:{user_id}")
+        if not stored_code:
+            return False, "Code de vérification non trouvé. Veuillez recommencer."
 
-            stored_code = stored_code.decode('utf-8')
-            
-            # Get access token
-            access_token = await self.get_valid_token()
-            if not access_token:
-                # Check if authentication is needed
-                if self.redis_client.get('linkedin_auth_needed'):
-                    return False, "Authentification LinkedIn requise. Un administrateur sera notifié."
-                return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+        stored_code = stored_code.decode('utf-8')
+        
+        # Get access token
+        access_token = await self.get_valid_token()
+        if not access_token:
+            # Check if authentication is needed
+            if self.redis_client.get('linkedin_auth_needed'):
+                return False, "Authentification LinkedIn requise. Un administrateur sera notifié."
+            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
 
-            # Make LinkedIn API request
-            post_id = "7254038723820949505"
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "X-Restli-Protocol-Version": "2.0.0",
-                    "LinkedIn-Version": "202304"
-                }
+        # Make LinkedIn API request
+        post_id = "7254038723820949505"
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "X-Restli-Protocol-Version": "2.0.0",
+                "LinkedIn-Version": "202304"
+            }
 
-                try:
-                    async with session.get(
-                        f"https://api.linkedin.com/v2/socialActions/{post_id}/comments",
-                        headers=headers,
-                        timeout=10
-                    ) as response:
-                        if response.status == 401:
-                            self.redis_client.delete('linkedin_token')
-                            return False, "Session LinkedIn expirée. Un administrateur sera notifié."
+            try:
+                async with session.get(
+                    f"https://api.linkedin.com/v2/socialActions/{post_id}/comments",
+                    headers=headers,
+                    timeout=10
+                ) as response:
+                    if response.status == 401:
+                        self.redis_client.delete('linkedin_token')
+                        return False, "Session LinkedIn expirée. Un administrateur sera notifié."
 
-                        if response.status != 200:
-                            logger.error(f"LinkedIn API error: {response.status}")
-                            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+                    if response.status != 200:
+                        logger.error(f"LinkedIn API error: {response.status}")
+                        return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
 
-                        data = await response.json()
-                        return await self.process_comments(data, stored_code, user_id)
+                    data = await response.json()
+                    return await self.process_comments(data, stored_code, user_id)
 
-                except aiohttp.ClientError as e:
-                    logger.error(f"Network error: {str(e)}")
-                    return False, "Erreur de connexion réseau. Veuillez réessayer plus tard."
+            except aiohttp.ClientError as e:
+                logger.error(f"Network error: {str(e)}")
+                return False, "Erreur de connexion réseau. Veuillez réessayer plus tard."
 
-        except Exception as e:
-            logger.error(f"Error verifying LinkedIn comment: {str(e)}")
-            return False, "Erreur technique. Veuillez réessayer plus tard."
+    except Exception as e:
+        logger.error(f"Error verifying LinkedIn comment: {str(e)}")
+        return False, "Erreur technique. Veuillez réessayer plus tard."
 
-    async def process_comments(self, data: dict, stored_code: str, user_id: str) -> Tuple[bool, str]:
-        """
-        Process LinkedIn comments to find verification code
-        """
-        comments = data.get('elements', [])
-        if not comments:
-            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+async def process_comments(self, data: dict, stored_code: str, user_id: str) -> Tuple[bool, str]:
+    """
+    Process LinkedIn comments to find verification code
+    """
+    comments = data.get('elements', [])
+    if not comments:
+        return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
 
-        code_timestamp = self.redis_client.get(f"linkedin_code_timestamp:{user_id}")
-        if not code_timestamp:
-            return False, "Session expirée. Veuillez recommencer."
+    code_timestamp = self.redis_client.get(f"linkedin_code_timestamp:{user_id}")
+    if not code_timestamp:
+        return False, "Session expirée. Veuillez recommencer."
 
-        code_timestamp = float(code_timestamp.decode('utf-8'))
+    code_timestamp = float(code_timestamp.decode('utf-8'))
 
-        for comment in comments:
-            comment_text = comment.get('message', {}).get('text', '').strip()
-            comment_time = int(comment.get('created', {}).get('time', 0)) / 1000
+    for comment in comments:
+        comment_text = comment.get('message', {}).get('text', '').strip()
+        comment_time = int(comment.get('created', {}).get('time', 0)) / 1000
 
-            if stored_code == comment_text and comment_time > code_timestamp:
-                logger.info(f"Valid comment found for user {user_id}")
-                return True, "Vérification réussie!"
+        if stored_code == comment_text and comment_time > code_timestamp:
+            logger.info(f"Valid comment found for user {user_id}")
+            return True, "Vérification réussie!"
 
-        return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+    return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
 
 async def handle_linkedin_verification(query, user_id, context):
     """Handle LinkedIn verification process"""
