@@ -316,6 +316,8 @@ async def handle_delete_question(query, context):
     except Exception as e:
         logger.error(f"Error deleting question: {str(e)}")
         await query.message.edit_text("❌ Une erreur s'est produite lors de la suppression.")
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle callback queries"""
     query = update.callback_query
@@ -326,65 +328,64 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         if query.data.startswith("verify_"):
             verification_code = query.data.split("_")[1]
-            redis_client = context.application.redis_client
             
-            # Retrieve stored data
+            # Verify the stored code matches
             stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
-            stored_email = redis_client.get(f"linkedin_email:{user_id}")
-            stored_cv_type = redis_client.get(f"linkedin_cv_type:{user_id}")
-            
-            stored_data = {
-                'code': stored_code.decode('utf-8') if stored_code else None,
-                'email': stored_email.decode('utf-8') if stored_email else None,
-                'cv_type': stored_cv_type.decode('utf-8') if stored_cv_type else None
-            }
-            
-            if not all(stored_data.values()):
+            if not stored_code:
                 await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
                 return
-            
-            if verification_code != stored_data['code']:
-                await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
+                
+            stored_code = stored_code.decode('utf-8')
+            if verification_code != stored_code:
+                await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
                 return
             
             await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
             
-            comment_verified = await verify_linkedin_comment(user_id)
-            if not comment_verified:
+            verified, message = await verify_linkedin_comment(user_id)
+            if not verified:
                 await query.message.edit_text(
-                    "❌ Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code."
+                    f"❌ {message}\n"
+                    "Veuillez suivre toutes les étapes dans l'ordre:\n"
+                    "1. Voir la publication LinkedIn\n"
+                    "2. Commenter avec le code exact\n"
+                    "3. Puis cliquer sur 'J'ai commenté'"
                 )
                 return
             
-            await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
+            # Get stored email and CV type
+            stored_email = redis_client.get(f"linkedin_email:{user_id}")
+            stored_cv_type = redis_client.get(f"linkedin_cv_type:{user_id}")
             
-            try:
-                result = await send_email_with_cv(
-                    stored_data['email'],
-                    stored_data['cv_type'],
-                    user_id,
-                    context.application.supabase
-                )
+            if not stored_email or not stored_cv_type:
+                await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
+                return
                 
-                # Clean up Redis data
-                redis_keys = [
-                    f"linkedin_verification_code:{user_id}",
-                    f"linkedin_email:{user_id}",
-                    f"linkedin_cv_type:{user_id}"
-                ]
-                redis_client.delete(*redis_keys)
-                
-                await query.message.edit_text(result)
-                
-            except Exception as e:
-                logger.error(f"Error sending CV: {str(e)}")
-                await query.message.edit_text(
-                    "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer."
-                )
-    
+            stored_email = stored_email.decode('utf-8')
+            stored_cv_type = stored_cv_type.decode('utf-8')
+            
+            # Send the CV
+            result = await send_email_with_cv(
+                stored_email,
+                stored_cv_type,
+                user_id,
+                context.application.supabase
+            )
+            
+            # Clean up Redis data
+            redis_keys = [
+                f"linkedin_verification_code:{user_id}",
+                f"linkedin_code_timestamp:{user_id}",
+                f"linkedin_email:{user_id}",
+                f"linkedin_cv_type:{user_id}"
+            ]
+            redis_client.delete(*redis_keys)
+            
+            await query.message.edit_text(result)
+            
     except Exception as e:
         logger.error(f"Error in callback handler: {str(e)}")
-        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer.")
+        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv")
 
 
 @private_chat_only
