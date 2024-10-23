@@ -109,8 +109,7 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Error listing questions: {str(e)}")
         await update.message.reply_text('❌ Une erreur s\'est produite lors de la récupération des questions.')
-        
-@private_chat_only
+        @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /sendcv command"""
     try:
@@ -147,19 +146,10 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await update.message.reply_text(f"❌ Erreur: {str(e)}")
                 return
 
-        # Generate verification code with timestamp
-        verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        current_time = time.time()
-        
-        # Store verification data in Redis with timestamp
-        redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
-        redis_client.setex(f"linkedin_code_timestamp:{user_id}", 3600, str(current_time))
-        redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
-        redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
-        
         # Check if user has already received a CV in the past
         try:
-            response = await context.application.supabase.table(SENT_EMAILS_TABLE)\
+            # Execute Supabase query without await
+            response = context.application.supabase.table(SENT_EMAILS_TABLE)\
                 .select('*')\
                 .filter('email', 'eq', email)\
                 .execute()
@@ -172,8 +162,23 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 else:
                     await update.message.reply_text(f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}.')
                     return
+
         except Exception as e:
             logger.error(f"Error checking previous CV sends: {str(e)}")
+            # Continue execution even if check fails
+        
+        # Generate verification code
+        verification_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        current_timestamp = str(int(datetime.utcnow().timestamp()))
+        
+        # Get Redis client from context
+        redis_client = context.application.redis_client
+        
+        # Store verification data in Redis with timestamp
+        redis_client.setex(f"linkedin_verification_code:{user_id}", 3600, verification_code)
+        redis_client.setex(f"linkedin_code_timestamp:{user_id}", 3600, current_timestamp)
+        redis_client.setex(f"linkedin_email:{user_id}", 3600, email)
+        redis_client.setex(f"linkedin_cv_type:{user_id}", 3600, cv_type)
         
         linkedin_post_url = "https://www.linkedin.com/feed/update/urn:li:activity:7254038723820949505"
         
@@ -183,7 +188,7 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
+        instructions = (
             f"Pour recevoir votre CV, veuillez suivre ces étapes dans l'ordre :\n\n"
             f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
             f"2. Suivre notre page LinkedIn\n"
@@ -193,13 +198,15 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"- Le code est valide pendant 1 heure\n"
             f"- Vous devez suivre les étapes dans l'ordre\n"
             f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
-            f"- Un seul CV par adresse email",
-            reply_markup=reply_markup
+            f"- Un seul CV par adresse email"
         )
+        
+        await update.message.reply_text(instructions, reply_markup=reply_markup)
         
     except Exception as e:
         logger.error(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
+        
 
 
 async def handle_linkedin_verification(query, user_id, context):
@@ -217,57 +224,44 @@ async def handle_linkedin_verification(query, user_id, context):
             'cv_type': stored_cv_type.decode('utf-8') if stored_cv_type else None
         }
         
-        logger.info(f"Retrieved stored data for user {user_id}: {stored_data}")
-        
         if not all(stored_data.values()):
             await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
             return
         
         verification_code = query.data.split("_")[1]
         if verification_code != stored_data['code']:
-            await query.message.edit_text("❌ Code de vérification invalide. Veuillez réessayer avec /sendcv")
+            await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
             return
         
         await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
         
-        comment_verified = await verify_linkedin_comment(user_id)
-        if not comment_verified:
-            await query.message.edit_text(
-                "❌ Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code sur la publication LinkedIn."
-            )
+        verified, message = await verify_linkedin_comment(user_id)
+        if not verified:
+            await query.message.edit_text(message)
             return
         
-        await query.message.edit_text("✅ Commentaire vérifié. Envoi du CV en cours...")
+        # Send CV without await for Supabase
+        result = await send_email_with_cv(
+            stored_data['email'],
+            stored_data['cv_type'],
+            user_id,
+            context.bot.supabase
+        )
         
-        try:
-            result = await send_email_with_cv(
-                stored_data['email'], 
-                stored_data['cv_type'], 
-                user_id,
-                context.bot.supabase
-            )
-            
-            # Clean up Redis data
-            redis_keys = [
-                f"linkedin_verification_code:{user_id}",
-                f"linkedin_email:{user_id}",
-                f"linkedin_cv_type:{user_id}"
-            ]
-            redis_client.delete(*redis_keys)
-            
-            await query.message.edit_text(f"✅ Vérification réussie!\n{result}")
-            
-        except Exception as e:
-            logger.error(f"Error sending CV: {str(e)}")
-            await query.message.edit_text(
-                "❌ Une erreur s'est produite lors de l'envoi du CV. Veuillez réessayer avec /sendcv"
-            )
-            
+        # Clean up Redis data
+        redis_keys = [
+            f"linkedin_verification_code:{user_id}",
+            f"linkedin_code_timestamp:{user_id}",
+            f"linkedin_email:{user_id}",
+            f"linkedin_cv_type:{user_id}"
+        ]
+        redis_client.delete(*redis_keys)
+        
+        await query.message.edit_text(result)
+        
     except Exception as e:
         logger.error(f"Error in LinkedIn verification: {str(e)}")
-        await query.message.edit_text(
-            "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
-        )
+        await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv")
 
 async def handle_answer_question(query, context):
     """Handle admin answering a question"""
