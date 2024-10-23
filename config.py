@@ -20,6 +20,7 @@ LINKEDIN_SCOPE = 'email, openid, profile, r_organization_admin, r_organization_s
 REDIS_URL = os.getenv('REDIS_URL')
 COMPANY_PAGE_ID=105488010
 
+LINKEDIN_POST_ID = "7254038723820949505"
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
