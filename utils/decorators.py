@@ -18,7 +18,7 @@ def private_chat_only(func):
     """Decorator to restrict commands to private chats only"""
     @wraps(func)
     async def wrapped(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if update.effective_chat and update.effective_chat.type !== 'private':
+        if update.effective_chat and update.effective_chat.type == 'private':
             return await func(self, update, context, *args, **kwargs)
         else:
             await update.message.reply_text('❌ Cette commande fonctionne uniquement dans un chat privé.')
