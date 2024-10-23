@@ -226,6 +226,78 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error in send_cv command: {str(e)}")
         await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
+async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
+    """
+    Verify if a user has commented on the LinkedIn post with their verification code
+    Returns tuple of (success, message)
+    """
+    stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
+    
+    if not stored_code:
+        return False, "Code de vérification non trouvé. Veuillez recommencer."
+        
+    stored_code = stored_code.decode('utf-8') if isinstance(stored_code, bytes) else stored_code
+    
+    try:
+        # Get valid token
+        access_token = await token_manager.get_valid_token()
+        if not access_token:
+            return False, "Erreur d'authentification LinkedIn. Veuillez réessayer plus tard."
+        
+        post_id = "7254038723820949505"
+        comments_url = f"https://api.linkedin.com/v2/socialActions/{post_id}/comments"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-Restli-Protocol-Version": "2.0.0",
+            "LinkedIn-Version": "202304"
+        }
+        
+        response = await asyncio.to_thread(
+            requests.get,
+            comments_url,
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            logger.error("LinkedIn token expired")
+            return False, "Erreur d'authentification LinkedIn. Veuillez réessayer plus tard."
+            
+        response.raise_for_status()
+        comments = response.json().get('elements', [])
+        
+        if not comments:
+            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+
+        # Get timestamp when code was generated
+        code_timestamp = redis_client.get(f"linkedin_code_timestamp:{user_id}")
+        if not code_timestamp:
+            return False, "Session expirée. Veuillez recommencer."
+            
+        code_timestamp = float(code_timestamp.decode('utf-8'))
+        
+        # Look for the exact code in comments
+        code_found = False
+        for comment in comments:
+            comment_text = comment.get('message', {}).get('text', '').strip()
+            comment_time = int(comment.get('created', {}).get('time', 0)) / 1000  # Convert to seconds
+            
+            if stored_code == comment_text:  # Exact match only
+                if comment_time < code_timestamp:
+                    continue  # Skip comments made before code generation
+                code_found = True
+                break
+        
+        if not code_found:
+            return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+        
+        return True, "Vérification réussie!"
+        
+    except Exception as e:
+        logger.error(f"Error verifying LinkedIn comment: {str(e)}", exc_info=True)
+        return False, "Une erreur est survenue lors de la vérification. Veuillez réessayer plus tard."
+
 
 async def handle_linkedin_verification(query, user_id, context):
     """Handle LinkedIn verification process"""
