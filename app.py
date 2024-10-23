@@ -2,7 +2,7 @@ import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN
 from handlers.admin_handlers import liste_questions, tag_all, offremploi
-from handlers.user_handlers import start, ask_question, send_cv, my_id
+# from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
 
 logging.basicConfig(
@@ -17,8 +17,8 @@ def main() -> None:
 
         # Add handlers
         application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("question", ask_question))
-        application.add_handler(CommandHandler("liste_questions", liste_questions))
+        # application.add_handler(CommandHandler("question", ask_question))
+        # application.add_handler(CommandHandler("liste_questions", liste_questions))
         application.add_handler(CommandHandler("sendcv", send_cv))
         application.add_handler(CommandHandler("myid", my_id))
         
