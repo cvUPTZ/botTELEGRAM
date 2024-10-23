@@ -12,7 +12,7 @@ from utils.email_utils import send_email_with_cv
 from utils.linkedin_utils import TokenManager
 from config import (
     ADMIN_USER_IDS,
-    QUESTIONS_TABLE,
+    # QUESTIONS_TABLE,
     SENT_EMAILS_TABLE,
     USERS_TABLE,
     REDIS_URL
