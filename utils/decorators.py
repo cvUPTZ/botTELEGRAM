@@ -14,11 +14,9 @@ def admin_only(func):
     return wrapped
 
 def private_chat_only(func):
-    @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        # Proceed only if the chat type is private
         if update.effective_chat and update.effective_chat.type == 'private':
-            return await func(update, context, *args, **kwargs)  # Execute the original command
+            return await func(update, context, *args, **kwargs)
         else:
-            await update.message.reply_text("🚫 This command can only be used in private chats.")
+            await update.message.reply_text('❌ Cette commande fonctionne uniquement dans un chat privé.')
     return wrapped
