@@ -5,8 +5,8 @@ import signal
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
-from handlers.admin_handlers import liste_questions, tag_all, offremploi
-from handlers.user_handlers import start, ask_question, send_cv, my_id, callback_handler
+from handlers.admin_handlers import  tag_all, offremploi
+from handlers.user_handlers import start, send_cv, my_id, callback_handler
 from handlers.message_handlers import welcome_new_member, handle_message
 from config import BOT_TOKEN, REDIS_URL, SUPABASE_URL, SUPABASE_KEY
 import redis
@@ -71,8 +71,8 @@ def create_application():
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("question", ask_question))
-    application.add_handler(CommandHandler("liste_questions", liste_questions))
+    # application.add_handler(CommandHandler("question", ask_question))
+    # application.add_handler(CommandHandler("liste_questions", liste_questions))
     application.add_handler(CommandHandler("sendcv", send_cv))
     application.add_handler(CommandHandler("myid", my_id))
     application.add_handler(CommandHandler("tagall", tag_all))
