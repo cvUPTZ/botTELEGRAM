@@ -2,7 +2,7 @@ import logging
 import random
 import string
 from datetime import datetime
-from typing import Tuple
+from typing import Tuple, Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
@@ -21,6 +21,8 @@ from config import (
     VERIFICATION_CODE_LENGTH,
     LINKEDIN_POST_URL
 )
+
+# Rest of the code remains the same...
 
 # Configure logging
 logging.basicConfig(
