@@ -106,15 +106,6 @@ class TokenManager:
 token_manager = TokenManager()
 
 async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
-    """
-    Verify if a user has commented on the LinkedIn post with their verification code
-    
-    Args:
-        user_id (str): The user ID to verify
-        
-    Returns:
-        Tuple[bool, str]: (success, message)
-    """
     stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
     
     if not stored_code:
@@ -137,66 +128,39 @@ async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
             "LinkedIn-Version": "202304"
         }
         
-        max_retries = 3
-        retry_count = 0
+        response = await asyncio.to_thread(
+            requests.get,
+            comments_url,
+            headers=headers,
+            timeout=10
+        )
         
-        while retry_count < max_retries:
-            try:
-                response = await asyncio.to_thread(
-                    requests.get,
-                    comments_url,
-                    headers=headers,
-                    timeout=10
-                )
+        response.raise_for_status()
+        comments = response.json().get('elements', [])
+        
+        # Add timestamp check to ensure comment was made after code generation
+        code_generation_time = redis_client.get(f"linkedin_code_timestamp:{user_id}")
+        if not code_generation_time:
+            return False, "Session expirée. Veuillez recommencer."
+            
+        code_generation_time = float(code_generation_time)
+        
+        code_found = False
+        for comment in comments:
+            comment_text = comment.get('message', {}).get('text', '').strip()
+            comment_time = comment.get('created', {}).get('time', 0) / 1000  # Convert to seconds
+            
+            if stored_code in comment_text:
+                if comment_time < code_generation_time:
+                    return False, "Le commentaire a été fait avant la génération du code. Veuillez recommencer."
+                code_found = True
+                break
                 
-                if response.status_code == 401:
-                    # Token might be expired, force refresh
-                    access_token = await token_manager.get_valid_token()
-                    if not access_token:
-                        return False, "Erreur d'authentification LinkedIn. Veuillez réessayer plus tard."
-                    headers["Authorization"] = f"Bearer {access_token}"
-                    retry_count += 1
-                    continue
-                        
-                response.raise_for_status()
-                
-                comments = response.json().get('elements', [])
-                logger.info(f"Retrieved {len(comments)} comments from LinkedIn post")
-                
-                # Cache successful response
-                cache_key = f"linkedin_comments_cache:{post_id}"
-                redis_client.setex(
-                    cache_key,
-                    timedelta(minutes=5),
-                    json.dumps(comments)
-                )
-                
-                for comment in comments:
-                    comment_text = comment.get('message', {}).get('text', '').strip()
-                    if stored_code in comment_text:
-                        logger.info(f"Found matching verification code for user {user_id}")
-                        
-                        # Store verification success
-                        verification_data = {
-                            "verified_at": datetime.utcnow().isoformat(),
-                            "comment_id": comment.get('id'),
-                            "user_id": user_id
-                        }
-                        redis_client.set(
-                            f"linkedin_verified:{user_id}",
-                            json.dumps(verification_data)
-                        )
-                        
-                        return True, "Vérification réussie!"
-                
-                return False, "Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code."
-                
-            except requests.exceptions.RequestException as e:
-                retry_count += 1
-                if retry_count == max_retries:
-                    return False, f"Erreur de connexion après {max_retries} tentatives. Veuillez réessayer plus tard."
-                await asyncio.sleep(1)
-                
+        if not code_found:
+            return False, "Commentaire non trouvé. Assurez-vous d'avoir commenté avec le bon code."
+            
+        return True, "Vérification réussie!"
+        
     except Exception as e:
         logger.error(f"Error verifying LinkedIn comment: {str(e)}", exc_info=True)
         return False, "Une erreur est survenue. Veuillez réessayer plus tard."
