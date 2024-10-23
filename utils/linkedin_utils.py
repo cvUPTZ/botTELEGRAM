@@ -178,14 +178,81 @@ async def handle_linkedin_callback(code: str, state: str) -> Dict[str, str]:
 
 async def verify_linkedin_comment(user_id: str) -> Tuple[bool, str]:
     """
-    Verify if a user has commented on the LinkedIn post with their verification code
+    Verify if a user has commented on the LinkedIn post with their verification code.
+    
+    Args:
+        user_id (str): The ID of the user to verify.
+        
+    Returns:
+        Tuple[bool, str]: A tuple where the first value is a boolean indicating success or failure, 
+                          and the second value is a message providing details.
     """
     try:
+        # Retrieve the stored verification code from Redis
         stored_code = redis_client.get(f"linkedin_verification_code:{user_id}")
         if not stored_code:
             return False, "Code de vérification non trouvé. Veuillez recommencer."
-            
+
         stored_code = stored_code.decode('utf-8') if isinstance(stored_code, bytes) else stored_code
+
+        # Get LinkedIn token using TokenManager
+        token_manager = TokenManager()
+        access_token = await token_manager.get_valid_token()
+        
+        if not access_token:
+            logger.error("Failed to get valid LinkedIn token")
+            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer dans quelques minutes."
+
+        # Make LinkedIn API request to fetch comments on the post
+        post_id = "7254038723820949505"
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "X-Restli-Protocol-Version": "2.0.0",
+                "LinkedIn-Version": "202304"
+            }
+
+            async with session.get(
+                f"https://api.linkedin.com/v2/socialActions/{post_id}/comments",
+                headers=headers,
+                timeout=10
+            ) as response:
+                if response.status == 401:
+                    logger.error("LinkedIn token unauthorized")
+                    return False, "Erreur d'authentification LinkedIn. Veuillez réessayer dans quelques minutes."
+
+                if response.status != 200:
+                    logger.error(f"LinkedIn API error: {response.status}")
+                    return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+
+                data = await response.json()
+                comments = data.get('elements', [])
+
+                if not comments:
+                    return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+
+                # Retrieve the timestamp when the code was generated
+                code_timestamp = redis_client.get(f"linkedin_code_timestamp:{user_id}")
+                if not code_timestamp:
+                    return False, "Session expirée. Veuillez recommencer."
+
+                code_timestamp = float(code_timestamp.decode('utf-8'))
+
+                # Look for the exact code in the LinkedIn comments
+                for comment in comments:
+                    comment_text = comment.get('message', {}).get('text', '').strip()
+                    comment_time = int(comment.get('created', {}).get('time', 0)) / 1000
+
+                    if stored_code == comment_text and comment_time > code_timestamp:
+                        logger.info(f"Valid comment found for user {user_id}")
+                        return True, "Vérification réussie!"
+
+                return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+
+    except Exception as e:
+        logger.error(f"Error verifying LinkedIn comment: {str(e)}")
+        return False, "Erreur technique. Veuillez réessayer plus tard."
+
 
 
 def is_linkedin_verified(user_id: str) -> bool:
