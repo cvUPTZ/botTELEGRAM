@@ -43,30 +43,41 @@ class LinkedInTokenManager:
     """Manage LinkedIn access tokens."""
     
     def __init__(self, redis_client: Redis, config: LinkedInConfig):
+        if redis_client is None:
+            raise ValueError("redis_client cannot be None")
         self.redis = redis_client
         self.config = config
         self.token_key_prefix = "linkedin_token:"
         self.token_expiry_prefix = "linkedin_token_expiry:"
-    
+
     async def get_token(self, user_id: int) -> Optional[str]:
         """Get valid access token for user."""
-        token = await self.redis.get(f"{self.token_key_prefix}{user_id}")
-        if not token:
-            return None
+        try:
+            token = await self.redis.get(f"{self.token_key_prefix}{user_id}")
+            if not token:
+                return None
 
-        expiry = await self.redis.get(f"{self.token_expiry_prefix}{user_id}")
-        if not expiry or float(expiry.decode('utf-8')) < datetime.utcnow().timestamp():
-            return None
+            expiry = await self.redis.get(f"{self.token_expiry_prefix}{user_id}")
+            if not expiry or float(expiry.decode('utf-8')) < datetime.utcnow().timestamp():
+                return None
 
-        return token.decode('utf-8')
+            return token.decode('utf-8')
+        
+        except RedisError as e:
+            logger.error(f"Redis error while getting token for user {user_id}: {str(e)}")
+            return None
 
     async def store_token(self, user_id: int, access_token: str, expires_in: int) -> None:
         """Store access token with expiry."""
-        expiry = datetime.utcnow() + timedelta(seconds=expires_in)
-        pipeline = self.redis.pipeline()
-        pipeline.setex(f"{self.token_key_prefix}{user_id}", expires_in, access_token)
-        pipeline.setex(f"{self.token_expiry_prefix}{user_id}", expires_in, expiry.timestamp())
-        await pipeline.execute()
+        try:
+            expiry = datetime.utcnow() + timedelta(seconds=expires_in)
+            pipeline = self.redis.pipeline()
+            pipeline.setex(f"{self.token_key_prefix}{user_id}", expires_in, access_token)
+            pipeline.setex(f"{self.token_expiry_prefix}{user_id}", expires_in, expiry.timestamp())
+            await pipeline.execute()
+        
+        except RedisError as e:
+            logger.error(f"Redis error while storing token for user {user_id}: {str(e)}")
 
     async def refresh_token(self, user_id: int) -> Optional[str]:
         """Refresh expired access token."""
@@ -88,13 +99,17 @@ class LinkedInTokenManager:
                     return result['access_token']
                     
         except Exception as e:
-            logger.error(f"Error refreshing token: {str(e)}")
+            logger.error(f"Error refreshing token for user {user_id}: {str(e)}")
             return None
 
     async def get_refresh_token(self, user_id: int) -> Optional[str]:
         """Get refresh token for user."""
-        token = await self.redis.get(f"linkedin_refresh_token:{user_id}")
-        return token.decode('utf-8') if token else None
+        try:
+            token = await self.redis.get(f"linkedin_refresh_token:{user_id}")
+            return token.decode('utf-8') if token else None
+        except RedisError as e:
+            logger.error(f"Redis error while getting refresh token for user {user_id}: {str(e)}")
+            return None
 
 class LinkedInVerificationManager:
     """Manage LinkedIn comment verification process."""
