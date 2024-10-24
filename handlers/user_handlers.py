@@ -59,7 +59,10 @@ class RedisKeys:
 
 class UserCommandHandler:
     ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
-
+        
+    # Add rate limiting constants
+    MAX_ATTEMPTS = 5  # Maximum number of attempts allowed
+    RATE_LIMIT_WINDOW = 60 * 60  # Time window in seconds (1 hour)
     def __init__(
         self,
         redis_client: redis.Redis,
