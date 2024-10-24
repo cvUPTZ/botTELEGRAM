@@ -1,3 +1,4 @@
+import re
 import logging
 import random
 import string
@@ -13,6 +14,7 @@ from telegram.ext import (
     Application
 )
 from telegram.error import TelegramError
+from redis.exceptions import RedisError
 
 import redis
 from supabase import create_client, Client
@@ -77,6 +79,14 @@ class UserCommandHandler:
         self.linkedin_token_manager = linkedin_token_manager
         self.verification_manager = linkedin_verification_manager 
 
+    async def handle_telegram_error(self, message: Message, error: TelegramError):
+        """Handle errors coming from Telegram API"""
+        await message.reply_text("⚠️ Une erreur s'est produite avec Telegram. Veuillez réessayer.")
+        logger.error(f"TelegramError: {error}")
+
+    async def handle_generic_error(self, message: Message):
+        """Handle generic errors during command execution"""
+        await message.reply_text("❌ Une erreur inattendue est survenue. Veuillez réessayer plus tard.")
 
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
@@ -86,10 +96,10 @@ class UserCommandHandler:
         key = RedisKeys.RATE_LIMIT.format(user_id, command)
         attempts = self.redis_client.get(key)
         
-        if attempts and int(attempts) >= self.max_attempts:
+        if attempts and int(attempts) >= self.MAX_ATTEMPTS:
             return False
-        
-        self.redis_client.incr(key)
+        self.redis_client.expire(key, self.RATE_LIMIT_WINDOW)
+
         if not attempts:
             self.redis_client.expire(key, self.rate_limit_window)
         
@@ -125,6 +135,12 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Error in start command: {str(e)}")
             await self.handle_generic_error(update.message)
+
+    def is_valid_email(self, email: str) -> bool:
+        """Simple email format validation"""
+        
+        regex = r'^\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        return re.match(regex, email) is not None
 
     @private_chat_only
     async def send_cv(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
