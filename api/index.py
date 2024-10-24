@@ -22,15 +22,25 @@ def hello():
 
 @app.route('/webhook', methods=['POST'])
 async def webhook():
-    if request.method == "POST":
-        application = create_application()
-        await application.initialize()
+    try:
+        if request.method == "POST":
+            application = create_application()
+            await application.initialize()
+            
+            update = Update.de_json(request.get_json(force=True), application.bot)
+            await application.process_update(update)
+            
+            await application.shutdown()
+            return jsonify({"status": "ok"})
+            
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "An error occurred processing the webhook"
+        }), 500
         
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        await application.process_update(update)
-        
-        await application.shutdown()
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "error", "message": "Invalid request method"}), 405
 
 
 @app.route('/start-linkedin-auth/<int:user_id>/<cv_type>/<email>')
