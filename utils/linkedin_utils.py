@@ -182,13 +182,21 @@ class LinkedInVerificationManager:
 
     async def _ensure_redis_connection(self) -> None:
         """Ensure Redis connection is available."""
-        if self.redis is None:
-            raise LinkedInError("Redis client not initialized", LinkedInErrorCode.REDIS_ERROR)
+        if not self.redis or isinstance(self.redis, bool):
+            logger.info("Redis client not initialized or invalid. Attempting to initialize.")
+            try:
+                # Replace with actual initialization logic for Redis connection
+                self.redis = await aioredis.create_redis_pool("redis://:AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA@devoted-filly-34475.upstash.io:6379")  # Example
+            except RedisError as e:
+                logger.error(f"Failed to initialize Redis connection: {str(e)}")
+                raise LinkedInError("Redis client initialization failed", LinkedInErrorCode.REDIS_ERROR)
+    
         try:
             await self.redis.ping()
         except (RedisError, AttributeError) as e:
             logger.error(f"Redis connection error: {str(e)}")
             raise LinkedInError("Redis connection failed", LinkedInErrorCode.REDIS_ERROR)
+
 
     async def generate_verification_code(self, user_id: int, length: int = 6) -> str:
         """Generate and store a new verification code for the user."""
