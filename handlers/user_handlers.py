@@ -17,14 +17,14 @@ from telegram.error import TelegramError
 import redis
 from supabase import create_client, Client
 
-from .linkedin_utils import (
+from utils.linkedin_utils import (
     LinkedInVerificationManager,
     LinkedInTokenManager,
     LinkedInConfig,
     LinkedInError,
     LinkedInErrorCode
 )
-from .email_utils import send_email_with_cv
+from utils.email_utils import send_email_with_cv
 
 # Configure logging
 logging.basicConfig(
