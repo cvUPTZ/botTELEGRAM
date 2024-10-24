@@ -82,12 +82,10 @@ class UserCommandHandler:
             linkedin_config
         )
 
-
-    
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
         # Skip rate limiting for admins
-        if user_id in ADMIN_IDS:
+        if user_id in self.ADMIN_IDS:  # Fixed: Using self.ADMIN_IDS instead of ADMIN_IDS
             return True
     
         key = RedisKeys.RATE_LIMIT.format(user_id, command)
