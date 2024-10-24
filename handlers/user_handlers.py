@@ -79,18 +79,27 @@ class UserCommandHandler:
             self.token_manager,
             linkedin_config
         )
+    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
+
+    
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
+        # Skip rate limiting for admins
+        if user_id in ADMIN_IDS:
+            return True
+    
         key = RedisKeys.RATE_LIMIT.format(user_id, command)
         attempts = self.redis_client.get(key)
         
         if attempts and int(attempts) >= self.max_attempts:
             return False
-            
+    
         self.redis_client.incr(key)
         if not attempts:
             self.redis_client.expire(key, self.rate_limit_window)
+        
         return True
+
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
