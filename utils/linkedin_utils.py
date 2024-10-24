@@ -151,11 +151,9 @@ class LinkedInVerificationManager:
         """Verify user's LinkedIn comment"""
         try:
             # Get stored verification data
-            verification_code = self.redis.get(f"linkedin_verification_code:{user_id}")
+            verification_code = await self.get_stored_code(user_id)
             if not verification_code:
                 return False, "❌ Code de vérification expiré ou introuvable."
-            
-            verification_code = verification_code.decode('utf-8')
             
             # Get access token
             access_token = await self.token_manager.get_token(user_id)
@@ -200,7 +198,6 @@ class LinkedInVerificationManager:
                     'Content-Type': 'application/json'
                 }
                 
-                # Get post comments
                 url = (
                     f"https://api.linkedin.com/v2/socialActions/"
                     f"{self.config.company_page_id}_"
@@ -217,11 +214,11 @@ class LinkedInVerificationManager:
                     data = await response.json()
                     
                     # Check comments for verification code
-                    for comment in data.get('elements', []):
-                        if verification_code in comment.get('message', {}).get('text', ''):
-                            return True
-                            
-                    return False
+                    elements = data.get('elements', [])
+                    return any(
+                        verification_code in comment.get('message', {}).get('text', '')
+                        for comment in elements
+                    )
                     
         except aiohttp.ClientError as e:
             logger.error(f"Network error checking comment: {str(e)}")
@@ -243,17 +240,37 @@ class LinkedInVerificationManager:
         verification_code: str
     ) -> None:
         """Store verification data in Redis"""
-        self.redis.setex(
-            f"linkedin_verification_code:{user_id}",
-            self.verification_ttl,
-            verification_code
-        )
+        try:
+            # Use a coroutine-friendly way to set Redis key
+            await self.redis.setex(
+                f"linkedin_verification_code:{user_id}",
+                self.verification_ttl,
+                verification_code
+            )
+        except AttributeError:
+            # Fallback for synchronous Redis client
+            self.redis.setex(
+                f"linkedin_verification_code:{user_id}",
+                self.verification_ttl,
+                verification_code
+            )
 
     async def get_stored_code(self, user_id: int) -> Optional[str]:
         """Get stored verification code"""
-        code = self.redis.get(f"linkedin_verification_code:{user_id}")
+        try:
+            # Try async Redis get
+            code = await self.redis.get(f"linkedin_verification_code:{user_id}")
+        except AttributeError:
+            # Fallback for synchronous Redis client
+            code = self.redis.get(f"linkedin_verification_code:{user_id}")
+        
         return code.decode('utf-8') if code else None
 
     async def cleanup_verification_data(self, user_id: int) -> None:
         """Clean up verification data from Redis"""
-        self.redis.delete(f"linkedin_verification_code:{user_id}")
+        try:
+            # Try async Redis delete
+            await self.redis.delete(f"linkedin_verification_code:{user_id}")
+        except AttributeError:
+            # Fallback for synchronous Redis client
+            self.redis.delete(f"linkedin_verification_code:{user_id}")
