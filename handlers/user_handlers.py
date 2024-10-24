@@ -9,20 +9,19 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from utils.decorators import private_chat_only
 from utils.email_utils import send_email_with_cv
-from utils.linkedin_utils import (
-    LinkedInAuthManager,
-    TokenManager,
-    LinkedInVerificationManager,
-    REDIS_KEYS
-)
 from config import (
     ADMIN_USER_IDS,
     SENT_EMAILS_TABLE,
     VERIFICATION_CODE_LENGTH,
-    LINKEDIN_POST_URL
+    LINKEDIN_POST_URL,
+    LINKEDIN_POST_ID,
+    API_TIMEOUT_SECONDS
 )
 
-# Rest of the code remains the same...
+import aiohttp
+import asyncio
+import redis
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -31,14 +30,91 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Redis key constants
+REDIS_KEYS = {
+    'VERIFICATION_CODE': 'linkedin_verification_code:{}',
+    'CODE_TIMESTAMP': 'linkedin_code_timestamp:{}',
+    'EMAIL': 'linkedin_email:{}',
+    'CV_TYPE': 'linkedin_cv_type:{}'
+}
+
+class LinkedInVerificationManager:
+    """Handle LinkedIn verification process with simplified code matching"""
+    def __init__(self, redis_client: redis.Redis):
+        self.redis_client = redis_client
+
+    async def verify_linkedin_comment(self, user_id: str) -> Tuple[bool, str]:
+        """Verify if a user has commented on the LinkedIn post with their verification code"""
+        try:
+            stored_code = self.redis_client.get(REDIS_KEYS['VERIFICATION_CODE'].format(user_id))
+            if not stored_code:
+                return False, "Code de vérification non trouvé. Veuillez recommencer."
+
+            stored_code = stored_code.decode('utf-8')
+            
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "X-Restli-Protocol-Version": "2.0.0",
+                    "LinkedIn-Version": "202304"
+                }
+
+                try:
+                    async with session.get(
+                        f"https://api.linkedin.com/v2/socialActions/{LINKEDIN_POST_ID}/comments",
+                        headers=headers,
+                        timeout=API_TIMEOUT_SECONDS
+                    ) as response:
+                        if response.status != 200:
+                            logger.error("LinkedIn API error", extra={
+                                'status_code': response.status,
+                                'user_id': user_id,
+                                'endpoint': 'comments'
+                            })
+                            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+
+                        data = await response.json()
+                        return await self.process_comments(data, stored_code, user_id)
+
+                except asyncio.TimeoutError:
+                    logger.error("LinkedIn API timeout")
+                    return False, "Délai d'attente dépassé. Veuillez réessayer plus tard."
+
+                except aiohttp.ClientError as e:
+                    logger.error(f"Network error: {str(e)}")
+                    return False, "Erreur de connexion réseau. Veuillez réessayer plus tard."
+
+        except Exception as e:
+            logger.error(f"Error verifying LinkedIn comment: {str(e)}")
+            return False, "Erreur technique. Veuillez réessayer plus tard."
+
+    async def process_comments(self, data: Dict[str, Any], stored_code: str, user_id: str) -> Tuple[bool, str]:
+        """Process LinkedIn comments to find verification code"""
+        comments = data.get('elements', [])
+        if not comments:
+            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+
+        code_timestamp = self.redis_client.get(REDIS_KEYS['CODE_TIMESTAMP'].format(user_id))
+        if not code_timestamp:
+            return False, "Session expirée. Veuillez recommencer."
+
+        code_timestamp = float(code_timestamp.decode('utf-8'))
+
+        for comment in comments:
+            comment_text = comment.get('message', {}).get('text', '').strip()
+            comment_time = int(comment.get('created', {}).get('time', 0)) / 1000
+
+            if stored_code == comment_text and comment_time > code_timestamp:
+                logger.info(f"Valid comment found for user {user_id}")
+                return True, "Vérification réussie!"
+
+        return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+
 class UserCommandHandler:
     """Handle user commands and interactions"""
     def __init__(self, redis_client, supabase_client):
         self.redis_client = redis_client
         self.supabase = supabase_client
-        self.token_manager = TokenManager(redis_client)
-        self.auth_manager = LinkedInAuthManager(redis_client)
-        self.verification_manager = LinkedInVerificationManager(redis_client, self.token_manager)
+        self.verification_manager = LinkedInVerificationManager(redis_client)
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -47,112 +123,14 @@ class UserCommandHandler:
         try:
             await update.message.reply_text(
                 '👋 Bonjour ! Voici les commandes disponibles :\n\n'
-                '/question - Poser une question\n'
-                '/liste_questions - Voir et répondre aux questions (réservé aux administrateurs)\n'
-                '/sendcv - Recevoir un CV (nécessite de suivre notre page LinkedIn)\n'
-                '/admin_auth - Authentifier LinkedIn (réservé aux administrateurs)\n'
-                '📄 N\'oubliez pas de suivre notre page LinkedIn avant de demander un CV !'
+                '/sendcv - Recevoir un CV\n'
+                '/myid - Voir votre ID\n\n'
+                '📄 Pour recevoir un CV, vous devrez commenter sur notre publication LinkedIn !'
             )
             logger.info("Start message sent successfully")
         except Exception as e:
             logger.error(f"Error sending start message: {str(e)}")
             await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
-
-    
-    async def admin_auth_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Command handler for admin authentication"""
-        user_id = update.effective_user.id
-        
-        if user_id not in ADMIN_USER_IDS:
-            await update.message.reply_text('❌ Cette commande est réservée aux administrateurs.')
-            return
-            
-        try:
-            auth_manager = LinkedInAuthManager(context.bot_data.get('redis_client'))
-            auth_url = auth_manager.get_auth_url()
-            
-            keyboard = [[InlineKeyboardButton("🔐 Authentifier LinkedIn", url=auth_url)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                "🔄 Pour ré-authentifier LinkedIn, suivez ces étapes:\n\n"
-                "1. Cliquez sur le bouton ci-dessous\n"
-                "2. Connectez-vous à LinkedIn\n"
-                "3. Autorisez l'application\n"
-                "4. Copiez le code de la redirection\n"
-                "5. Utilisez /auth_callback [code] pour terminer\n\n"
-                "⚠️ Cette authentification est nécessaire pour vérifier les commentaires LinkedIn.",
-                reply_markup=reply_markup
-            )
-        except Exception as e:
-            logger.error(f"Error in admin_auth command: {str(e)}")
-            await update.message.reply_text("❌ Une erreur s'est produite lors de l'authentification.")
-            
-    # @private_chat_only
-    # async def admin_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    #     """Handle LinkedIn authentication for admins"""
-    #     user_id = update.effective_user.id
-        
-    #     if user_id not in ADMIN_USER_IDS:
-    #         await update.message.reply_text('❌ Cette commande est réservée aux administrateurs.')
-    #         return
-            
-    #     try:
-    #         auth_url = self.auth_manager.get_auth_url()
-    #         keyboard = [[InlineKeyboardButton("🔐 Authentifier LinkedIn", url=auth_url)]]
-    #         reply_markup = InlineKeyboardMarkup(keyboard)
-            
-    #         await update.message.reply_text(
-    #             "🔄 Veuillez suivre ces étapes:\n\n"
-    #             "1. Cliquez sur le bouton ci-dessous\n"
-    #             "2. Connectez-vous à LinkedIn\n"
-    #             "3. Autorisez l'application\n"
-    #             "4. Copiez le code de la redirection\n"
-    #             "5. Utilisez /auth_callback [code] pour terminer",
-    #             reply_markup=reply_markup
-    #         )
-    #     except Exception as e:
-    #         logger.error(f"Error in admin_auth: {str(e)}")
-    #         await update.message.reply_text("❌ Une erreur s'est produite lors de l'authentification.")
-
-    @private_chat_only
-    async def auth_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle LinkedIn authentication callback for admins"""
-        user_id = update.effective_user.id
-        
-        if user_id not in ADMIN_USER_IDS:
-            await update.message.reply_text('❌ Cette commande est réservée aux administrateurs.')
-            return
-            
-        if not context.args:
-            await update.message.reply_text('❌ Veuillez fournir le code d\'autorisation.')
-            return
-            
-        try:
-            code = context.args[0]
-            result = await self.auth_manager.initialize_token(code)
-            
-            if result:
-                await update.message.reply_text('✅ Authentification LinkedIn réussie!')
-                await self.notify_other_admins(context, user_id)
-            else:
-                await update.message.reply_text('❌ Échec de l\'authentification. Veuillez réessayer.')
-                
-        except Exception as e:
-            logger.error(f"Error in auth_callback: {str(e)}")
-            await update.message.reply_text("❌ Une erreur s'est produite lors de l'authentification.")
-
-    async def notify_other_admins(self, context: ContextTypes.DEFAULT_TYPE, initiator_id: int) -> None:
-        """Notify other admins about authentication"""
-        for admin_id in ADMIN_USER_IDS:
-            if admin_id != initiator_id:
-                try:
-                    await context.bot.send_message(
-                        admin_id,
-                        f"ℹ️ LinkedIn a été ré-authentifié par l'administrateur {initiator_id}"
-                    )
-                except Exception:
-                    logger.error(f"Failed to notify admin {admin_id}")
 
     @private_chat_only
     async def send_cv(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -182,7 +160,6 @@ class UserCommandHandler:
             logger.error(f"Error in send_cv command: {str(e)}")
             await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-    
     async def handle_cv_request(
         self, 
         update: Update, 
@@ -191,18 +168,9 @@ class UserCommandHandler:
         email: str,
         cv_type: str
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
-        """Handle CV request logic - All users must verify through LinkedIn"""
+        """Handle CV request logic with simplified verification"""
         try:
-            # Check LinkedIn authentication status
-            if self.redis_client.get(REDIS_KEYS['AUTH_NEEDED']):
-                await self.notify_admins_auth_needed(context, user_id)
-                return None, (
-                    "⏳ Nous rencontrons un problème technique temporaire.\n"
-                    "Les administrateurs ont été notifiés et traiteront votre demande dès que possible.\n"
-                    "Veuillez réessayer dans quelques minutes."
-                )
-
-            # Check previous CV sends for all users
+            # Check previous CV sends
             if await self.check_previous_cv(email, cv_type):
                 return None, f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
 
@@ -218,17 +186,13 @@ class UserCommandHandler:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             # Prepare instructions message
-            user_type = "administrateur" if user_id in ADMIN_USER_IDS else "utilisateur"
             instructions = (
-                f"Bonjour {user_type},\n\n"
-                f"Pour recevoir votre CV, veuillez suivre ces étapes dans l'ordre :\n\n"
+                f"Pour recevoir votre CV, veuillez suivre ces étapes:\n\n"
                 f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
-                f"2. Suivre notre page LinkedIn\n"
-                f"3. Commenter avec exactement ce code : {verification_code}\n"
-                f"4. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
+                f"2. Commenter avec exactement ce code : {verification_code}\n"
+                f"3. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
                 f"⚠️ Important:\n"
                 f"- Le code est valide pendant 1 heure\n"
-                f"- Vous devez suivre les étapes dans l'ordre\n"
                 f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
                 f"- Un seul CV par adresse email"
             )
@@ -245,7 +209,7 @@ class UserCommandHandler:
         user_id: int,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle LinkedIn verification process for all users"""
+        """Handle LinkedIn verification process"""
         try:
             stored_data = await self.get_stored_verification_data(user_id)
             if not stored_data['code']:
@@ -257,8 +221,7 @@ class UserCommandHandler:
                 await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
                 return
             
-            user_type = "administrateur" if user_id in ADMIN_USER_IDS else "utilisateur"
-            await query.message.edit_text(f"🔄 Vérification du commentaire LinkedIn en cours... ({user_type})")
+            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
             
             verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
             if not verified:
@@ -311,20 +274,6 @@ class UserCommandHandler:
         self.redis_client.setex(REDIS_KEYS['EMAIL'].format(user_id), 3600, email)
         self.redis_client.setex(REDIS_KEYS['CV_TYPE'].format(user_id), 3600, cv_type)
 
-    async def notify_admins_auth_needed(self, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
-        """Notify admins that LinkedIn authentication is needed"""
-        notification = (
-            "🔴 Attention: L'authentification LinkedIn est nécessaire.\n"
-            f"Demande de CV en attente de l'utilisateur {user_id}.\n"
-            "Utilisez /admin_auth pour ré-authentifier."
-        )
-        for admin_id in ADMIN_USER_IDS:
-            try:
-                await context.bot.send_message(admin_id, notification)
-            except Exception:
-                logger.error(f"Failed to notify admin {admin_id}")
-
-
     async def get_stored_verification_data(self, user_id: int) -> dict:
         """Retrieve stored verification data from Redis"""
         stored_code = self.redis_client.get(REDIS_KEYS['VERIFICATION_CODE'].format(user_id))
@@ -374,8 +323,6 @@ def setup_handlers(application, handler_instance: UserCommandHandler):
     application.add_handler(CommandHandler("start", handler_instance.start))
     application.add_handler(CommandHandler("sendcv", handler_instance.send_cv))
     application.add_handler(CommandHandler("myid", handler_instance.my_id))
-    application.add_handler(CommandHandler("admin_auth", handler_instance.admin_auth_command))
-    application.add_handler(CommandHandler("auth_callback", handler_instance.auth_callback))
     
     # Callback query handler
     application.add_handler(CallbackQueryHandler(handler_instance.callback_handler))
