@@ -23,6 +23,7 @@ import redis
 from supabase import create_client, Client
 from utils.linkedin_utils import LinkedInConfig, LinkedInTokenManager, LinkedInVerificationManager
 
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -30,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class CustomApplication(Application):
-    """Custom Application class with additional clients"""
+    """Custom Application class with additional clients."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.supabase = None
@@ -82,7 +83,7 @@ class CustomDefaultBuilder(Application.builder().__class__):
         return app
 
 def create_application():
-    """Create and configure the application with all handlers"""
+    """Create and configure the application with all handlers."""
     try:
         # Initialize clients
         redis_client = redis.from_url(REDIS_URL)
@@ -99,7 +100,7 @@ def create_application():
             company_page_id=COMPANY_PAGE_ID,
             post_id=LINKEDIN_POST_ID
         )
-        
+
         # Create application with all clients
         application = CustomApplication.builder()\
             .token(BOT_TOKEN)\
@@ -121,6 +122,7 @@ def create_application():
         application.add_handler(CommandHandler("start", user_handler.start))
         application.add_handler(CommandHandler("sendcv", user_handler.send_cv))
         application.add_handler(CommandHandler("myid", user_handler.my_id))
+        # Uncomment if needed
         # application.add_handler(CommandHandler("verify", user_handler.verify_linkedin))
         application.add_handler(CallbackQueryHandler(user_handler.callback_handler))
 
@@ -137,31 +139,26 @@ def create_application():
         raise
 
 async def main():
-    """Main entry point to run the application"""
-    try:
-        application = create_application()
+    """Main entry point to run the application."""
+    application = create_application()
+    
+    if not application:
+        logger.error("Failed to create application. Exiting...")
+        return
 
-        if not application:
-            logger.error("Failed to create application. Exiting...")
-            return
+    # Graceful shutdown handling
+    loop = asyncio.get_running_loop()
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        loop.add_signal_handler(
+            sig, lambda: asyncio.create_task(application.shutdown())
+        )
 
-        # Graceful shutdown handling
-        loop = asyncio.get_running_loop()
-        for sig in [signal.SIGINT, signal.SIGTERM]:
-            loop.add_signal_handler(
-                sig, lambda: asyncio.create_task(application.shutdown())
-            )
-
-        await application.initialize()
-        await application.start()
-        logger.info("Bot started successfully")
-        await application.run_polling()
-        await application.shutdown()
-        
-    except Exception as e:
-        logger.error(f"Error in main: {str(e)}")
-        raise
-
+    await application.initialize()
+    await application.start()
+    logger.info("Bot started successfully")
+    await application.run_polling()
+    await application.shutdown()
+    
 if __name__ == "__main__":
     try:
         asyncio.run(main())
