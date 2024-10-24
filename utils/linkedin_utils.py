@@ -269,12 +269,13 @@ class LinkedInVerificationManager:
         """Get stored verification code with error handling"""
         try:
             code = await self.redis.get(f"linkedin_verification_code:{user_id}")
-            if code:
-                return code.decode('utf-8')
+            if code is not None:
+                return code.decode('utf-8')  # Decode bytes to string
             return None
         except RedisError as e:
             logger.error(f"Redis error getting stored code: {str(e)}")
             return None
+
 
 
     async def _cleanup_verification_data(self, user_id: int) -> None:
