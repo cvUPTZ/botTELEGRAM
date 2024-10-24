@@ -144,7 +144,47 @@ class LinkedInVerificationManager:
         self.token_manager = token_manager
         self.config = config
         self.verification_ttl = verification_ttl
+
+    async def _check_linkedin_comment(
+        self,
+        access_token: str,
+        verification_code: str,
+        timeout: float = 10.0
+    ) -> bool:
+        """Check if verification code exists in post comments with timeout"""
+        url = f"https://api.linkedin.com/v2/socialActions/{self.config.post_id}/comments"
         
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=timeout) as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to fetch comments: {response.status} - {await response.text()}")
+                        raise LinkedInError("Failed to fetch comments", LinkedInErrorCode.API_ERROR)
+                    
+                    comments = await response.json()
+                    
+                    # Check if verification_code is in any of the comments
+                    for comment in comments.get('elements', []):
+                        if 'specificContent' in comment and 'com.linkedin.ugc.ShareContent' in comment['specificContent']:
+                            text = comment['specificContent']['com.linkedin.ugc.ShareContent']['text']
+                            if verification_code in text:
+                                return True
+                    
+                    return False
+    
+        except aiohttp.ClientTimeout:
+            logger.error("Request to LinkedIn API timed out.")
+            raise LinkedInError("Request to LinkedIn API timed out.", LinkedInErrorCode.API_ERROR)
+    
+        except Exception as e:
+            logger.error(f"Unexpected error while checking LinkedIn comments: {str(e)}", exc_info=True)
+            raise LinkedInError("An unexpected error occurred.", LinkedInErrorCode.API_ERROR)
+
     async def verify_linkedin_comment(
         self,
         user_id: int,
