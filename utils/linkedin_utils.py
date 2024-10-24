@@ -59,15 +59,16 @@ class LinkedInTokenManager:
     
     async def get_token(self, user_id: int) -> Optional[str]:
         """Get valid access token for user"""
-        token = self.redis.get(f"{self.token_key_prefix}{user_id}")
+        token = await self.redis.get(f"{self.token_key_prefix}{user_id}")
         if not token:
             return None
-            
-        expiry = self.redis.get(f"{self.token_expiry_prefix}{user_id}")
-        if not expiry or float(expiry) < datetime.utcnow().timestamp():
+    
+        expiry = await self.redis.get(f"{self.token_expiry_prefix}{user_id}")
+        if not expiry or float(expiry.decode('utf-8')) < datetime.utcnow().timestamp():
             return None
-            
+    
         return token.decode('utf-8')
+
 
     async def store_token(
         self,
@@ -268,10 +269,13 @@ class LinkedInVerificationManager:
         """Get stored verification code with error handling"""
         try:
             code = await self.redis.get(f"linkedin_verification_code:{user_id}")
-            return code.decode('utf-8') if code else None
+            if code:
+                return code.decode('utf-8')
+            return None
         except RedisError as e:
             logger.error(f"Redis error getting stored code: {str(e)}")
             return None
+
 
     async def _cleanup_verification_data(self, user_id: int) -> None:
         """Clean up verification data from Redis with error handling"""
