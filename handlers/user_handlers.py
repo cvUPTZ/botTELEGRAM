@@ -152,6 +152,7 @@ class UserCommandHandler:
             logger.error(f"Error in send_cv command: {str(e)}")
             await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
+    
     async def handle_cv_request(
         self, 
         update: Update, 
@@ -160,54 +161,93 @@ class UserCommandHandler:
         email: str,
         cv_type: str
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
-        """Handle CV request logic"""
-        # Admin bypass
-        if user_id in ADMIN_USER_IDS:
-            try:
-                result = await send_email_with_cv(email, cv_type, user_id, self.supabase)
-                return None, result
-            except Exception as e:
-                logger.error(f"Error sending CV for admin {user_id}: {str(e)}")
-                return None, f"❌ Erreur: {str(e)}"
+        """Handle CV request logic - All users must verify through LinkedIn"""
+        try:
+            # Check LinkedIn authentication status
+            if self.redis_client.get(REDIS_KEYS['AUTH_NEEDED']):
+                await self.notify_admins_auth_needed(context, user_id)
+                return None, (
+                    "⏳ Nous rencontrons un problème technique temporaire.\n"
+                    "Les administrateurs ont été notifiés et traiteront votre demande dès que possible.\n"
+                    "Veuillez réessayer dans quelques minutes."
+                )
 
-        # Check LinkedIn authentication
-        if self.redis_client.get(REDIS_KEYS['AUTH_NEEDED']):
-            await self.notify_admins_auth_needed(context, user_id)
-            return None, (
-                "⏳ Nous rencontrons un problème technique temporaire.\n"
-                "Les administrateurs ont été notifiés et traiteront votre demande dès que possible.\n"
-                "Veuillez réessayer dans quelques minutes."
+            # Check previous CV sends for all users
+            if await self.check_previous_cv(email, cv_type):
+                return None, f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
+
+            # Generate and store verification data
+            verification_code = self.generate_verification_code()
+            await self.store_verification_data(user_id, email, cv_type, verification_code)
+            
+            # Create response markup
+            keyboard = [
+                [InlineKeyboardButton("📝 Voir la publication LinkedIn", url=LINKEDIN_POST_URL)],
+                [InlineKeyboardButton("✅ J'ai commenté", callback_data=f"verify_{verification_code}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Prepare instructions message
+            user_type = "administrateur" if user_id in ADMIN_USER_IDS else "utilisateur"
+            instructions = (
+                f"Bonjour {user_type},\n\n"
+                f"Pour recevoir votre CV, veuillez suivre ces étapes dans l'ordre :\n\n"
+                f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
+                f"2. Suivre notre page LinkedIn\n"
+                f"3. Commenter avec exactement ce code : {verification_code}\n"
+                f"4. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
+                f"⚠️ Important:\n"
+                f"- Le code est valide pendant 1 heure\n"
+                f"- Vous devez suivre les étapes dans l'ordre\n"
+                f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
+                f"- Un seul CV par adresse email"
             )
+            
+            return reply_markup, instructions
 
-        # Check previous CV sends
-        if await self.check_previous_cv(email, cv_type):
-            return None, f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
+        except Exception as e:
+            logger.error(f"Error in handle_cv_request: {str(e)}")
+            return None, "❌ Une erreur s'est produite. Veuillez réessayer plus tard."
 
-        # Generate and store verification data
-        verification_code = self.generate_verification_code()
-        await self.store_verification_data(user_id, email, cv_type, verification_code)
-        
-        # Create response markup
-        keyboard = [
-            [InlineKeyboardButton("📝 Voir la publication LinkedIn", url=LINKEDIN_POST_URL)],
-            [InlineKeyboardButton("✅ J'ai commenté", callback_data=f"verify_{verification_code}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        instructions = (
-            f"Pour recevoir votre CV, veuillez suivre ces étapes dans l'ordre :\n\n"
-            f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
-            f"2. Suivre notre page LinkedIn\n"
-            f"3. Commenter avec exactement ce code : {verification_code}\n"
-            f"4. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
-            f"⚠️ Important:\n"
-            f"- Le code est valide pendant 1 heure\n"
-            f"- Vous devez suivre les étapes dans l'ordre\n"
-            f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
-            f"- Un seul CV par adresse email"
-        )
-        
-        return reply_markup, instructions
+    async def handle_linkedin_verification(
+        self,
+        query: Update.callback_query,
+        user_id: int,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle LinkedIn verification process for all users"""
+        try:
+            stored_data = await self.get_stored_verification_data(user_id)
+            if not stored_data['code']:
+                await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
+                return
+            
+            verification_code = query.data.split("_")[1]
+            if verification_code != stored_data['code']:
+                await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
+                return
+            
+            user_type = "administrateur" if user_id in ADMIN_USER_IDS else "utilisateur"
+            await query.message.edit_text(f"🔄 Vérification du commentaire LinkedIn en cours... ({user_type})")
+            
+            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+            if not verified:
+                await query.message.edit_text(message)
+                return
+            
+            result = await send_email_with_cv(
+                stored_data['email'],
+                stored_data['cv_type'],
+                user_id,
+                self.supabase
+            )
+            
+            await self.cleanup_verification_data(user_id)
+            await query.message.edit_text(result)
+            
+        except Exception as e:
+            logger.error(f"Error in LinkedIn verification: {str(e)}")
+            await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv")
 
     async def check_previous_cv(self, email: str, cv_type: str) -> bool:
         """Check if user has already received a CV"""
@@ -254,44 +294,6 @@ class UserCommandHandler:
             except Exception:
                 logger.error(f"Failed to notify admin {admin_id}")
 
-    async def handle_linkedin_verification(
-        self,
-        query: Update.callback_query,
-        user_id: int,
-        context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """Handle LinkedIn verification process"""
-        try:
-            stored_data = await self.get_stored_verification_data(user_id)
-            if not stored_data['code']:
-                await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
-                return
-            
-            verification_code = query.data.split("_")[1]
-            if verification_code != stored_data['code']:
-                await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
-                return
-            
-            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
-            
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
-            if not verified:
-                await query.message.edit_text(message)
-                return
-            
-            result = await send_email_with_cv(
-                stored_data['email'],
-                stored_data['cv_type'],
-                user_id,
-                self.supabase
-            )
-            
-            await self.cleanup_verification_data(user_id)
-            await query.message.edit_text(result)
-            
-        except Exception as e:
-            logger.error(f"Error in LinkedIn verification: {str(e)}")
-            await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv")
 
     async def get_stored_verification_data(self, user_id: int) -> dict:
         """Retrieve stored verification data from Redis"""
