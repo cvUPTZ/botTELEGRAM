@@ -349,16 +349,16 @@ class UserCommandHandler:
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
         try:
-            # Create pipeline
+            # Redis pipeline is synchronous, so don't await it
             pipeline = self.redis_client.pipeline()
-            
-            # Add get operations to pipeline
+    
+            # Add get operations to the pipeline
             pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
             pipeline.get(RedisKeys.EMAIL.format(user_id))
             pipeline.get(RedisKeys.CV_TYPE.format(user_id))
             
-            # Execute pipeline and get results
-            values = await pipeline.execute()
+            # Execute the pipeline synchronously without await
+            values = pipeline.execute()
             
             return {
                 'code': values[0].decode('utf-8') if values[0] else None,
@@ -380,9 +380,12 @@ class UserCommandHandler:
                 RedisKeys.CV_TYPE.format(user_id)
             ]
             pipeline.delete(*keys)
-            await pipeline.execute()
+            
+            # Execute the pipeline synchronously
+            pipeline.execute()
         except Exception as e:
             logger.error(f"Error cleaning up verification data: {str(e)}")
+
 
     @private_chat_only
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
