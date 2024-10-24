@@ -160,18 +160,15 @@ class UserCommandHandler:
             if cv_type not in ['junior', 'senior']:
                 raise CommandError('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
             
-            # For admin users, bypass verification and directly send the CV
-            if is_admin:
-                result = await send_email_with_cv(
-                    email,
-                    cv_type,
-                    user_id,
-                    self.supabase
-                )
-                await update.message.reply_text(result)
-                return
+            # Validate email format for all users
+            if not self.is_valid_email(email):
+                raise CommandError("❌ Format d'email invalide.")
+    
+            # Only check previous CV sends for non-admin users
+            if not is_admin and self.check_previous_cv(email, cv_type):
+                raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
                 
-            # For non-admin users, continue with normal verification flow
+            # Continue with LinkedIn verification for all users
             result = await self.handle_cv_request(update, context, user_id, email, cv_type)
             await update.message.reply_text(
                 result[1],
@@ -190,7 +187,6 @@ class UserCommandHandler:
     
 
     async def handle_cv_request(
-        
         self, 
         update: Update, 
         context: ContextTypes.DEFAULT_TYPE,
@@ -200,14 +196,6 @@ class UserCommandHandler:
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
         """Handle CV request logic with improved error handling"""
         try:
-            # Validate email format
-            if not self.is_valid_email(email):
-                raise CommandError("❌ Format d'email invalide.")
-    
-            # Check previous CV sends (remove await if check_previous_cv is not async)
-            if self.check_previous_cv(email, cv_type):  # Removed 'await'
-                raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
-    
             # Generate and store verification data
             verification_code = self.generate_verification_code()
             await self.store_verification_data(user_id, email, cv_type, verification_code)
