@@ -65,43 +65,39 @@ class UserCommandHandler:
         redis_client: redis.Redis,
         supabase_client: Client,
         linkedin_config: LinkedInConfig,
-        linkedin_token_manager: Optional[LinkedInTokenManager] = None,  # New parameter
         rate_limit_window: int = 3600,
         max_attempts: int = 3
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
         self.linkedin_config = linkedin_config
-        self.linkedin_token_manager = linkedin_token_manager or LinkedInTokenManager(redis_client, linkedin_config)  # Use the provided manager or create a new one
         self.rate_limit_window = rate_limit_window
         self.max_attempts = max_attempts
-    
+        
         # Initialize LinkedIn managers
+        self.linkedin_token_manager = LinkedInTokenManager(redis_client, linkedin_config)
         self.verification_manager = LinkedInVerificationManager(
             redis_client,
-            self.linkedin_token_manager,  # Use the initialized token manager
+            self.linkedin_token_manager,
             linkedin_config
         )
 
-
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
-        # Skip rate limiting for admins
-        if user_id in self.ADMIN_IDS:  # Fixed: Using self.ADMIN_IDS instead of ADMIN_IDS
+        if user_id in self.ADMIN_IDS:
             return True
-    
+        
         key = RedisKeys.RATE_LIMIT.format(user_id, command)
         attempts = self.redis_client.get(key)
         
         if attempts and int(attempts) >= self.max_attempts:
             return False
-    
+        
         self.redis_client.incr(key)
         if not attempts:
             self.redis_client.expire(key, self.rate_limit_window)
         
         return True
-
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -141,7 +137,6 @@ class UserCommandHandler:
             user_id = update.effective_user.id
             is_admin = user_id in self.ADMIN_IDS
             
-            # Only check rate limit for non-admin users
             if not is_admin and not await self.check_rate_limit(user_id, 'sendcv'):
                 await update.message.reply_text(
                     "⚠️ Vous avez atteint la limite de demandes de CV. "
@@ -162,15 +157,12 @@ class UserCommandHandler:
             if cv_type not in ['junior', 'senior']:
                 raise CommandError('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
             
-            # Validate email format for all users
             if not self.is_valid_email(email):
                 raise CommandError("❌ Format d'email invalide.")
     
-            # Only check previous CV sends for non-admin users
-            if not is_admin and self.check_previous_cv(email, cv_type):  # Removed await
+            if not is_admin and self.check_previous_cv(email, cv_type):
                 raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
                 
-            # Continue with LinkedIn verification for all users
             result = await self.handle_cv_request(update, context, user_id, email, cv_type)
             await update.message.reply_text(
                 result[1],
@@ -200,8 +192,6 @@ class UserCommandHandler:
             logger.error(f"Error checking previous CV sends: {str(e)}")
             return False
 
-    
-
     async def handle_cv_request(
         self, 
         update: Update, 
@@ -212,11 +202,9 @@ class UserCommandHandler:
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
         """Handle CV request logic with improved error handling"""
         try:
-            # Generate and store verification data
             verification_code = self.generate_verification_code()
             await self.store_verification_data(user_id, email, cv_type, verification_code)
             
-            # Create response markup
             keyboard = [
                 [InlineKeyboardButton(
                     "📝 Voir la publication LinkedIn",
@@ -231,17 +219,13 @@ class UserCommandHandler:
             
             instructions = self.generate_instructions_message(verification_code)
             return reply_markup, instructions
-    
+        
         except CommandError as e:
             raise
         except Exception as e:
             logger.error(f"Error in handle_cv_request: {str(e)}")
             raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-
-    
-
-    
     def generate_verification_code(self, length: int = 6) -> str:
         """Generate random verification code"""
         return ''.join(
@@ -250,8 +234,6 @@ class UserCommandHandler:
                 k=length
             )
         )
-
-    
 
     async def handle_linkedin_verification(
         self,
@@ -315,10 +297,8 @@ class UserCommandHandler:
             current_timestamp = str(int(datetime.utcnow().timestamp()))
             expiry_time = 3600  # 1 hour
             
-            # Create pipeline
             pipeline = self.redis_client.pipeline()
             
-            # Add commands to pipeline
             pipeline.setex(
                 RedisKeys.VERIFICATION_CODE.format(user_id),
                 expiry_time,
@@ -340,26 +320,21 @@ class UserCommandHandler:
                 cv_type
             )
             
-            # Execute pipeline (no await here)
             pipeline.execute()
             
         except Exception as e:
             logger.error(f"Error storing verification data: {str(e)}")
             raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
 
-
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
         try:
-            # Redis pipeline is synchronous, so don't await it
             pipeline = self.redis_client.pipeline()
     
-            # Add get operations to the pipeline
             pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
             pipeline.get(RedisKeys.EMAIL.format(user_id))
             pipeline.get(RedisKeys.CV_TYPE.format(user_id))
             
-            # Execute the pipeline synchronously without await
             values = pipeline.execute()
             
             return {
@@ -383,11 +358,9 @@ class UserCommandHandler:
             ]
             pipeline.delete(*keys)
             
-            # Execute the pipeline synchronously
             pipeline.execute()
         except Exception as e:
             logger.error(f"Error cleaning up verification data: {str(e)}")
-
 
     @private_chat_only
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -494,5 +467,3 @@ class UserCommandHandler:
         application.add_handler(CommandHandler("sendcv", self.send_cv))
         application.add_handler(CommandHandler("myid", self.my_id))
         application.add_handler(CallbackQueryHandler(self.callback_handler))
-
-    
