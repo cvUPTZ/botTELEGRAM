@@ -198,40 +198,7 @@ class UserCommandHandler:
             logger.error(f"Error checking previous CV sends: {str(e)}")
             return False
 
-    async def store_verification_data(
-        self,
-        user_id: int,
-        email: str,
-        cv_type: str,
-        verification_code: str
-    ) -> None:
-        """Store verification data in Redis"""
-        current_timestamp = str(int(datetime.utcnow().timestamp()))
-        expiry_time = 3600  # 1 hour
-        
-        # Redis pipeline operations
-        pipeline = self.redis_client.pipeline()
-        pipeline.setex(
-            RedisKeys.VERIFICATION_CODE.format(user_id),
-            expiry_time,
-            verification_code
-        )
-        pipeline.setex(
-            RedisKeys.CODE_TIMESTAMP.format(user_id),
-            expiry_time,
-            current_timestamp
-        )
-        pipeline.setex(
-            RedisKeys.EMAIL.format(user_id),
-            expiry_time,
-            email
-        )
-        pipeline.setex(
-            RedisKeys.CV_TYPE.format(user_id),
-            expiry_time,
-            cv_type
-        )
-        pipeline.execute()  # Removed await since Redis pipeline execute is not async
+    
 
     async def handle_cv_request(
         self, 
@@ -269,6 +236,20 @@ class UserCommandHandler:
             logger.error(f"Error in handle_cv_request: {str(e)}")
             raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
+
+    
+
+    
+    def generate_verification_code(self, length: int = 6) -> str:
+        """Generate random verification code"""
+        return ''.join(
+            random.choices(
+                string.ascii_uppercase + string.digits,
+                k=length
+            )
+        )
+
+    
 
     async def handle_linkedin_verification(
         self,
@@ -320,42 +301,81 @@ class UserCommandHandler:
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
 
-    
-    def generate_verification_code(self, length: int = 6) -> str:
-        """Generate random verification code"""
-        return ''.join(
-            random.choices(
-                string.ascii_uppercase + string.digits,
-                k=length
-            )
-        )
-
-    
-
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
-        keys = [
-            RedisKeys.VERIFICATION_CODE.format(user_id),
-            RedisKeys.EMAIL.format(user_id),
-            RedisKeys.CV_TYPE.format(user_id)
-        ]
-        
-        values = await self.redis_client.mget(keys)
-        return {
-            'code': values[0].decode('utf-8') if values[0] else None,
-            'email': values[1].decode('utf-8') if values[1] else None,
-            'cv_type': values[2].decode('utf-8') if values[2] else None
-        }
+        try:
+            # Create pipeline for batch operations
+            pipeline = await self.redis_client.pipeline()
+            
+            # Add get operations to pipeline
+            pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
+            pipeline.get(RedisKeys.EMAIL.format(user_id))
+            pipeline.get(RedisKeys.CV_TYPE.format(user_id))
+            
+            # Execute pipeline and get results
+            values = await pipeline.execute()
+            
+            return {
+                'code': values[0].decode('utf-8') if values[0] else None,
+                'email': values[1].decode('utf-8') if values[1] else None,
+                'cv_type': values[2].decode('utf-8') if values[2] else None
+            }
+        except Exception as e:
+            logger.error(f"Error retrieving verification data: {str(e)}")
+            return {'code': None, 'email': None, 'cv_type': None}
 
     async def cleanup_verification_data(self, user_id: int) -> None:
         """Clean up Redis verification data"""
-        keys = [
-            RedisKeys.VERIFICATION_CODE.format(user_id),
-            RedisKeys.CODE_TIMESTAMP.format(user_id),
-            RedisKeys.EMAIL.format(user_id),
-            RedisKeys.CV_TYPE.format(user_id)
-        ]
-        await self.redis_client.delete(*keys)
+        try:
+            pipeline = await self.redis_client.pipeline()
+            keys = [
+                RedisKeys.VERIFICATION_CODE.format(user_id),
+                RedisKeys.CODE_TIMESTAMP.format(user_id),
+                RedisKeys.EMAIL.format(user_id),
+                RedisKeys.CV_TYPE.format(user_id)
+            ]
+            pipeline.delete(*keys)
+            await pipeline.execute()
+        except Exception as e:
+            logger.error(f"Error cleaning up verification data: {str(e)}")
+
+    async def store_verification_data(
+        self,
+        user_id: int,
+        email: str,
+        cv_type: str,
+        verification_code: str
+    ) -> None:
+        """Store verification data in Redis"""
+        try:
+            current_timestamp = str(int(datetime.utcnow().timestamp()))
+            expiry_time = 3600  # 1 hour
+            
+            pipeline = await self.redis_client.pipeline()
+            pipeline.setex(
+                RedisKeys.VERIFICATION_CODE.format(user_id),
+                expiry_time,
+                verification_code
+            )
+            pipeline.setex(
+                RedisKeys.CODE_TIMESTAMP.format(user_id),
+                expiry_time,
+                current_timestamp
+            )
+            pipeline.setex(
+                RedisKeys.EMAIL.format(user_id),
+                expiry_time,
+                email
+            )
+            pipeline.setex(
+                RedisKeys.CV_TYPE.format(user_id),
+                expiry_time,
+                cv_type
+            )
+            await pipeline.execute()
+        except Exception as e:
+            logger.error(f"Error storing verification data: {str(e)}")
+            raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
 
     @private_chat_only
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
