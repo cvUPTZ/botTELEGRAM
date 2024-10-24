@@ -57,28 +57,26 @@ class RedisKeys:
     CV_TYPE = 'linkedin_cv_type:{}'
     RATE_LIMIT = 'rate_limit:{}:{}'
 
-class UserCommandHandler:
-    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
-
     def __init__(
         self,
         redis_client: redis.Redis,
         supabase_client: Client,
         linkedin_config: LinkedInConfig,
+        linkedin_token_manager: Optional[LinkedInTokenManager] = None,  # New parameter
         rate_limit_window: int = 3600,
         max_attempts: int = 3
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
         self.linkedin_config = linkedin_config
+        self.linkedin_token_manager = linkedin_token_manager or LinkedInTokenManager(redis_client, linkedin_config)  # Use the provided manager or create a new one
         self.rate_limit_window = rate_limit_window
         self.max_attempts = max_attempts
-        
+
         # Initialize LinkedIn managers
-        self.token_manager = LinkedInTokenManager(redis_client, linkedin_config)
         self.verification_manager = LinkedInVerificationManager(
             redis_client,
-            self.token_manager,
+            self.linkedin_token_manager,  # Use the initialized token manager
             linkedin_config
         )
 
