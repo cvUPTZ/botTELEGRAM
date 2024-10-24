@@ -165,7 +165,7 @@ class UserCommandHandler:
                 raise CommandError("❌ Format d'email invalide.")
     
             # Only check previous CV sends for non-admin users
-            if not is_admin and self.check_previous_cv(email, cv_type):
+            if not is_admin and self.check_previous_cv(email, cv_type):  # Removed await
                 raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
                 
             # Continue with LinkedIn verification for all users
@@ -184,7 +184,54 @@ class UserCommandHandler:
             logger.error(f"Error in send_cv command: {str(e)}")
             await self.handle_generic_error(update.message)
 
-    
+    def check_previous_cv(self, email: str, cv_type: str) -> bool:
+        """Check if user has already received a CV"""
+        try:
+            response = self.supabase.table('sent_emails')\
+                .select('*')\
+                .eq('email', email)\
+                .eq('cv_type', cv_type)\
+                .execute()
+            
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error checking previous CV sends: {str(e)}")
+            return False
+
+    async def store_verification_data(
+        self,
+        user_id: int,
+        email: str,
+        cv_type: str,
+        verification_code: str
+    ) -> None:
+        """Store verification data in Redis"""
+        current_timestamp = str(int(datetime.utcnow().timestamp()))
+        expiry_time = 3600  # 1 hour
+        
+        # Redis pipeline operations
+        pipeline = self.redis_client.pipeline()
+        pipeline.setex(
+            RedisKeys.VERIFICATION_CODE.format(user_id),
+            expiry_time,
+            verification_code
+        )
+        pipeline.setex(
+            RedisKeys.CODE_TIMESTAMP.format(user_id),
+            expiry_time,
+            current_timestamp
+        )
+        pipeline.setex(
+            RedisKeys.EMAIL.format(user_id),
+            expiry_time,
+            email
+        )
+        pipeline.setex(
+            RedisKeys.CV_TYPE.format(user_id),
+            expiry_time,
+            cv_type
+        )
+        pipeline.execute()  # Removed await since Redis pipeline execute is not async
 
     async def handle_cv_request(
         self, 
@@ -273,20 +320,7 @@ class UserCommandHandler:
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
 
-    async def check_previous_cv(self, email: str, cv_type: str) -> bool:
-        """Check if user has already received a CV"""
-        try:
-            response = self.supabase.table('sent_emails')\
-                .select('*')\
-                .eq('email', email)\
-                .eq('cv_type', cv_type)\
-                .execute()
-            
-            return bool(response.data)
-        except Exception as e:
-            logger.error(f"Error checking previous CV sends: {str(e)}")
-            return False
-
+    
     def generate_verification_code(self, length: int = 6) -> str:
         """Generate random verification code"""
         return ''.join(
@@ -296,39 +330,7 @@ class UserCommandHandler:
             )
         )
 
-    async def store_verification_data(
-        self,
-        user_id: int,
-        email: str,
-        cv_type: str,
-        verification_code: str
-    ) -> None:
-        """Store verification data in Redis"""
-        current_timestamp = str(int(datetime.utcnow().timestamp()))
-        expiry_time = 3600  # 1 hour
-        
-        pipeline = self.redis_client.pipeline()
-        pipeline.setex(
-            RedisKeys.VERIFICATION_CODE.format(user_id),
-            expiry_time,
-            verification_code
-        )
-        pipeline.setex(
-            RedisKeys.CODE_TIMESTAMP.format(user_id),
-            expiry_time,
-            current_timestamp
-        )
-        pipeline.setex(
-            RedisKeys.EMAIL.format(user_id),
-            expiry_time,
-            email
-        )
-        pipeline.setex(
-            RedisKeys.CV_TYPE.format(user_id),
-            expiry_time,
-            cv_type
-        )
-        await pipeline.execute()
+    
 
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
