@@ -1,27 +1,30 @@
 import logging
 import random
 import string
-from datetime import datetime
-from typing import Tuple, Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import Tuple, Optional, Dict, Any, List
+from functools import wraps
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
-
-from utils.decorators import private_chat_only
-from utils.email_utils import send_email_with_cv
-from config import (
-    ADMIN_USER_IDS,
-    SENT_EMAILS_TABLE,
-    VERIFICATION_CODE_LENGTH,
-    LINKEDIN_POST_URL,
-    LINKEDIN_POST_ID,
-    API_TIMEOUT_SECONDS
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram.ext import (
+    ContextTypes,
+    CommandHandler,
+    CallbackQueryHandler,
+    Application
 )
+from telegram.error import TelegramError
 
-import aiohttp
-import asyncio
 import redis
-import json
+from supabase import create_client, Client
+
+from .linkedin_api import (
+    LinkedInVerificationManager,
+    LinkedInTokenManager,
+    LinkedInConfig,
+    LinkedInError,
+    LinkedInErrorCode
+)
+from .email_utils import send_email_with_cv
 
 # Configure logging
 logging.basicConfig(
@@ -30,135 +33,136 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Redis key constants
-REDIS_KEYS = {
-    'VERIFICATION_CODE': 'linkedin_verification_code:{}',
-    'CODE_TIMESTAMP': 'linkedin_code_timestamp:{}',
-    'EMAIL': 'linkedin_email:{}',
-    'CV_TYPE': 'linkedin_cv_type:{}'
-}
+class CommandError(Exception):
+    """Custom exception for command handling errors"""
+    pass
 
-class LinkedInVerificationManager:
-    """Handle LinkedIn verification process with simplified code matching"""
-    def __init__(self, redis_client: redis.Redis):
-        self.redis_client = redis_client
+def private_chat_only(func):
+    """Decorator to restrict commands to private chats only"""
+    @wraps(func)
+    async def wrapped(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_chat.type != "private":
+            await update.message.reply_text(
+                "❌ Cette commande n'est disponible qu'en message privé."
+            )
+            return
+        return await func(self, update, context)
+    return wrapped
 
-    async def verify_linkedin_comment(self, user_id: str) -> Tuple[bool, str]:
-        """Verify if a user has commented on the LinkedIn post with their verification code"""
-        try:
-            stored_code = self.redis_client.get(REDIS_KEYS['VERIFICATION_CODE'].format(user_id))
-            if not stored_code:
-                return False, "Code de vérification non trouvé. Veuillez recommencer."
-
-            stored_code = stored_code.decode('utf-8')
-            
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "X-Restli-Protocol-Version": "2.0.0",
-                    "LinkedIn-Version": "202304"
-                }
-
-                try:
-                    async with session.get(
-                        f"https://api.linkedin.com/v2/socialActions/{LINKEDIN_POST_ID}/comments",
-                        headers=headers,
-                        timeout=API_TIMEOUT_SECONDS
-                    ) as response:
-                        if response.status != 200:
-                            logger.error("LinkedIn API error", extra={
-                                'status_code': response.status,
-                                'user_id': user_id,
-                                'endpoint': 'comments'
-                            })
-                            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
-
-                        data = await response.json()
-                        return await self.process_comments(data, stored_code, user_id)
-
-                except asyncio.TimeoutError:
-                    logger.error("LinkedIn API timeout")
-                    return False, "Délai d'attente dépassé. Veuillez réessayer plus tard."
-
-                except aiohttp.ClientError as e:
-                    logger.error(f"Network error: {str(e)}")
-                    return False, "Erreur de connexion réseau. Veuillez réessayer plus tard."
-
-        except Exception as e:
-            logger.error(f"Error verifying LinkedIn comment: {str(e)}")
-            return False, "Erreur technique. Veuillez réessayer plus tard."
-
-    async def process_comments(self, data: Dict[str, Any], stored_code: str, user_id: str) -> Tuple[bool, str]:
-        """Process LinkedIn comments to find verification code"""
-        comments = data.get('elements', [])
-        if not comments:
-            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
-
-        code_timestamp = self.redis_client.get(REDIS_KEYS['CODE_TIMESTAMP'].format(user_id))
-        if not code_timestamp:
-            return False, "Session expirée. Veuillez recommencer."
-
-        code_timestamp = float(code_timestamp.decode('utf-8'))
-
-        for comment in comments:
-            comment_text = comment.get('message', {}).get('text', '').strip()
-            comment_time = int(comment.get('created', {}).get('time', 0)) / 1000
-
-            if stored_code == comment_text and comment_time > code_timestamp:
-                logger.info(f"Valid comment found for user {user_id}")
-                return True, "Vérification réussie!"
-
-        return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+class RedisKeys:
+    """Redis key constants"""
+    VERIFICATION_CODE = 'linkedin_verification_code:{}'
+    CODE_TIMESTAMP = 'linkedin_code_timestamp:{}'
+    EMAIL = 'linkedin_email:{}'
+    CV_TYPE = 'linkedin_cv_type:{}'
+    RATE_LIMIT = 'rate_limit:{}:{}'
 
 class UserCommandHandler:
-    """Handle user commands and interactions"""
-    def __init__(self, redis_client, supabase_client):
+    """Handle user commands and interactions with improved error handling"""
+    def __init__(
+        self,
+        redis_client: redis.Redis,
+        supabase_client: Client,
+        linkedin_config: LinkedInConfig,
+        rate_limit_window: int = 3600,
+        max_attempts: int = 3
+    ):
         self.redis_client = redis_client
         self.supabase = supabase_client
-        self.verification_manager = LinkedInVerificationManager(redis_client)
+        self.rate_limit_window = rate_limit_window
+        self.max_attempts = max_attempts
+        
+        # Initialize LinkedIn managers
+        self.token_manager = LinkedInTokenManager(redis_client, linkedin_config)
+        self.verification_manager = LinkedInVerificationManager(
+            redis_client,
+            self.token_manager,
+            linkedin_config
+        )
+
+    async def check_rate_limit(self, user_id: int, command: str) -> bool:
+        """Check if user has exceeded rate limit for a command"""
+        key = RedisKeys.RATE_LIMIT.format(user_id, command)
+        attempts = self.redis_client.get(key)
+        
+        if attempts and int(attempts) >= self.max_attempts:
+            return False
+            
+        self.redis_client.incr(key)
+        if not attempts:
+            self.redis_client.expire(key, self.rate_limit_window)
+        return True
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle the /start command"""
-        logger.info(f"Start command received from user {update.effective_user.id}")
         try:
-            await update.message.reply_text(
+            user_id = update.effective_user.id
+            if not await self.check_rate_limit(user_id, 'start'):
+                await update.message.reply_text(
+                    "⚠️ Vous avez atteint la limite de commandes. "
+                    "Veuillez réessayer plus tard."
+                )
+                return
+
+            welcome_message = (
                 '👋 Bonjour ! Voici les commandes disponibles :\n\n'
                 '/sendcv - Recevoir un CV\n'
                 '/myid - Voir votre ID\n\n'
-                '📄 Pour recevoir un CV, vous devrez commenter sur notre publication LinkedIn !'
+                '📄 Pour recevoir un CV, vous devrez :\n'
+                '1. Fournir votre email\n'
+                '2. Choisir le type de CV (junior/senior)\n'
+                '3. Commenter sur notre publication LinkedIn'
             )
-            logger.info("Start message sent successfully")
+            await update.message.reply_text(welcome_message)
+            logger.info(f"Start command completed for user {user_id}")
+            
+        except TelegramError as e:
+            logger.error(f"Telegram error in start command: {str(e)}")
+            await self.handle_telegram_error(update.message, e)
         except Exception as e:
-            logger.error(f"Error sending start message: {str(e)}")
-            await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
+            logger.error(f"Error in start command: {str(e)}")
+            await self.handle_generic_error(update.message)
 
     @private_chat_only
     async def send_cv(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle the /sendcv command"""
         try:
             user_id = update.effective_user.id
+            if not await self.check_rate_limit(user_id, 'sendcv'):
+                await update.message.reply_text(
+                    "⚠️ Vous avez atteint la limite de demandes de CV. "
+                    "Veuillez réessayer dans 1 heure."
+                )
+                return
             
             if len(context.args) != 2:
-                await update.message.reply_text(
+                raise CommandError(
                     '❌ Format incorrect. Utilisez:\n'
                     '/sendcv [email] [junior|senior]\n'
                     'Exemple: /sendcv email@example.com junior'
                 )
-                return
             
             email, cv_type = context.args
             cv_type = cv_type.lower()
             
             if cv_type not in ['junior', 'senior']:
-                await update.message.reply_text('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
-                return
+                raise CommandError('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
             
             result = await self.handle_cv_request(update, context, user_id, email, cv_type)
-            await update.message.reply_text(result[1], reply_markup=result[0] if result[0] else None)
+            await update.message.reply_text(
+                result[1],
+                reply_markup=result[0] if result[0] else None
+            )
             
+        except CommandError as e:
+            await update.message.reply_text(str(e))
+        except TelegramError as e:
+            logger.error(f"Telegram error in send_cv command: {str(e)}")
+            await self.handle_telegram_error(update.message, e)
         except Exception as e:
             logger.error(f"Error in send_cv command: {str(e)}")
-            await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
+            await self.handle_generic_error(update.message)
 
     async def handle_cv_request(
         self, 
@@ -168,11 +172,15 @@ class UserCommandHandler:
         email: str,
         cv_type: str
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
-        """Handle CV request logic with simplified verification"""
+        """Handle CV request logic with improved error handling"""
         try:
+            # Validate email format
+            if not self.is_valid_email(email):
+                raise CommandError("❌ Format d'email invalide.")
+
             # Check previous CV sends
             if await self.check_previous_cv(email, cv_type):
-                return None, f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
+                raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
 
             # Generate and store verification data
             verification_code = self.generate_verification_code()
@@ -180,28 +188,25 @@ class UserCommandHandler:
             
             # Create response markup
             keyboard = [
-                [InlineKeyboardButton("📝 Voir la publication LinkedIn", url=LINKEDIN_POST_URL)],
-                [InlineKeyboardButton("✅ J'ai commenté", callback_data=f"verify_{verification_code}")]
+                [InlineKeyboardButton(
+                    "📝 Voir la publication LinkedIn",
+                    url=self.linkedin_config.post_url
+                )],
+                [InlineKeyboardButton(
+                    "✅ J'ai commenté",
+                    callback_data=f"verify_{verification_code}"
+                )]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            # Prepare instructions message
-            instructions = (
-                f"Pour recevoir votre CV, veuillez suivre ces étapes:\n\n"
-                f"1. Cliquer sur le bouton ci-dessous pour voir la publication\n"
-                f"2. Commenter avec exactement ce code : {verification_code}\n"
-                f"3. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
-                f"⚠️ Important:\n"
-                f"- Le code est valide pendant 1 heure\n"
-                f"- Les commentaires faits avant la génération du code ne sont pas valides\n"
-                f"- Un seul CV par adresse email"
-            )
-            
+            instructions = self.generate_instructions_message(verification_code)
             return reply_markup, instructions
 
+        except CommandError as e:
+            raise
         except Exception as e:
             logger.error(f"Error in handle_cv_request: {str(e)}")
-            return None, "❌ Une erreur s'est produite. Veuillez réessayer plus tard."
+            raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
     async def handle_linkedin_verification(
         self,
@@ -209,16 +214,20 @@ class UserCommandHandler:
         user_id: int,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle LinkedIn verification process"""
+        """Handle LinkedIn verification process with improved error handling"""
         try:
             stored_data = await self.get_stored_verification_data(user_id)
             if not stored_data['code']:
-                await query.message.edit_text("❌ Session expirée. Veuillez recommencer avec /sendcv")
+                await query.message.edit_text(
+                    "❌ Session expirée. Veuillez recommencer avec /sendcv"
+                )
                 return
             
             verification_code = query.data.split("_")[1]
             if verification_code != stored_data['code']:
-                await query.message.edit_text("❌ Code de vérification invalide. Veuillez recommencer avec /sendcv")
+                await query.message.edit_text(
+                    "❌ Code de vérification invalide. Veuillez recommencer avec /sendcv"
+                )
                 return
             
             await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
@@ -238,26 +247,39 @@ class UserCommandHandler:
             await self.cleanup_verification_data(user_id)
             await query.message.edit_text(result)
             
+        except LinkedInError as e:
+            logger.error(f"LinkedIn error in verification: {str(e)}")
+            await query.message.edit_text(
+                "❌ Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+            )
         except Exception as e:
             logger.error(f"Error in LinkedIn verification: {str(e)}")
-            await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv")
+            await query.message.edit_text(
+                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+            )
 
     async def check_previous_cv(self, email: str, cv_type: str) -> bool:
         """Check if user has already received a CV"""
         try:
-            response = self.supabase.table(SENT_EMAILS_TABLE)\
+            response = self.supabase.table('sent_emails')\
                 .select('*')\
-                .filter('email', 'eq', email)\
+                .eq('email', email)\
+                .eq('cv_type', cv_type)\
                 .execute()
-
-            return bool(response.data and response.data[0]['cv_type'] == cv_type)
+            
+            return bool(response.data)
         except Exception as e:
             logger.error(f"Error checking previous CV sends: {str(e)}")
             return False
 
-    def generate_verification_code(self) -> str:
+    def generate_verification_code(self, length: int = 6) -> str:
         """Generate random verification code"""
-        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=VERIFICATION_CODE_LENGTH))
+        return ''.join(
+            random.choices(
+                string.ascii_uppercase + string.digits,
+                k=length
+            )
+        )
 
     async def store_verification_data(
         self,
@@ -268,65 +290,160 @@ class UserCommandHandler:
     ) -> None:
         """Store verification data in Redis"""
         current_timestamp = str(int(datetime.utcnow().timestamp()))
+        expiry_time = 3600  # 1 hour
         
-        self.redis_client.setex(REDIS_KEYS['VERIFICATION_CODE'].format(user_id), 3600, verification_code)
-        self.redis_client.setex(REDIS_KEYS['CODE_TIMESTAMP'].format(user_id), 3600, current_timestamp)
-        self.redis_client.setex(REDIS_KEYS['EMAIL'].format(user_id), 3600, email)
-        self.redis_client.setex(REDIS_KEYS['CV_TYPE'].format(user_id), 3600, cv_type)
+        pipeline = self.redis_client.pipeline()
+        pipeline.setex(
+            RedisKeys.VERIFICATION_CODE.format(user_id),
+            expiry_time,
+            verification_code
+        )
+        pipeline.setex(
+            RedisKeys.CODE_TIMESTAMP.format(user_id),
+            expiry_time,
+            current_timestamp
+        )
+        pipeline.setex(
+            RedisKeys.EMAIL.format(user_id),
+            expiry_time,
+            email
+        )
+        pipeline.setex(
+            RedisKeys.CV_TYPE.format(user_id),
+            expiry_time,
+            cv_type
+        )
+        await pipeline.execute()
 
-    async def get_stored_verification_data(self, user_id: int) -> dict:
+    async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
-        stored_code = self.redis_client.get(REDIS_KEYS['VERIFICATION_CODE'].format(user_id))
-        stored_email = self.redis_client.get(REDIS_KEYS['EMAIL'].format(user_id))
-        stored_cv_type = self.redis_client.get(REDIS_KEYS['CV_TYPE'].format(user_id))
+        keys = [
+            RedisKeys.VERIFICATION_CODE.format(user_id),
+            RedisKeys.EMAIL.format(user_id),
+            RedisKeys.CV_TYPE.format(user_id)
+        ]
         
+        values = await self.redis_client.mget(keys)
         return {
-            'code': stored_code.decode('utf-8') if stored_code else None,
-            'email': stored_email.decode('utf-8') if stored_email else None,
-            'cv_type': stored_cv_type.decode('utf-8') if stored_cv_type else None
+            'code': values[0].decode('utf-8') if values[0] else None,
+            'email': values[1].decode('utf-8') if values[1] else None,
+            'cv_type': values[2].decode('utf-8') if values[2] else None
         }
 
     async def cleanup_verification_data(self, user_id: int) -> None:
         """Clean up Redis verification data"""
-        redis_keys = [
-            REDIS_KEYS['VERIFICATION_CODE'].format(user_id),
-            REDIS_KEYS['CODE_TIMESTAMP'].format(user_id),
-            REDIS_KEYS['EMAIL'].format(user_id),
-            REDIS_KEYS['CV_TYPE'].format(user_id)
+        keys = [
+            RedisKeys.VERIFICATION_CODE.format(user_id),
+            RedisKeys.CODE_TIMESTAMP.format(user_id),
+            RedisKeys.EMAIL.format(user_id),
+            RedisKeys.CV_TYPE.format(user_id)
         ]
-        self.redis_client.delete(*redis_keys)
+        await self.redis_client.delete(*keys)
 
     @private_chat_only
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle the /myid command"""
-        user_id = update.effective_user.id
-        await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+        try:
+            user_id = update.effective_user.id
+            if not await self.check_rate_limit(user_id, 'myid'):
+                await update.message.reply_text(
+                    "⚠️ Vous avez atteint la limite de commandes. "
+                    "Veuillez réessayer plus tard."
+                )
+                return
+                
+            await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
+            
+        except TelegramError as e:
+            logger.error(f"Telegram error in my_id command: {str(e)}")
+            await self.handle_telegram_error(update.message, e)
+        except Exception as e:
+            logger.error(f"Error in my_id command: {str(e)}")
+            await self.handle_generic_error(update.message)
 
-    async def callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle callback queries"""
+    async def callback_handler(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle callback queries with improved error handling"""
         query = update.callback_query
         user_id = update.effective_user.id
         
         try:
             await query.answer()
             
+            if not await self.check_rate_limit(user_id, 'callback'):
+                await query.message.edit_text(
+                    "⚠️ Vous avez atteint la limite de vérifications. "
+                    "Veuillez réessayer plus tard."
+                )
+                return
+            
             if query.data.startswith("verify_"):
                 await self.handle_linkedin_verification(query, user_id, context)
+            else:
+                logger.warning(f"Unknown callback data: {query.data}")
+                await query.message.edit_text("❌ Action invalide.")
             
+        except TelegramError as e:
+            logger.error(f"Telegram error in callback handler: {str(e)}")
+            await self.handle_telegram_error(query.message, e)
         except Exception as e:
             logger.error(f"Error in callback handler: {str(e)}")
-            await query.message.edit_text("❌ Une erreur s'est produite. Veuillez réessayer.")
+            await self.handle_generic_error(query.message)
 
-def setup_handlers(application, handler_instance: UserCommandHandler):
-    """Set up all command handlers"""
-    # Command handlers
-    application.add_handler(CommandHandler("start", handler_instance.start))
-    application.add_handler(CommandHandler("sendcv", handler_instance.send_cv))
-    application.add_handler(CommandHandler("myid", handler_instance.my_id))
+    async def handle_telegram_error(self, message: Message, error: TelegramError) -> None:
+        """Handle Telegram-specific errors"""
+        try:
+            if isinstance(error, TelegramError):
+                if "Message is not modified" in str(error):
+                    logger.warning("Attempted to edit message with same content")
+                    return
+                elif "Message to edit not found" in str(error):
+                    await message.reply_text(
+                        "❌ Message expiré. Veuillez réessayer la commande."
+                    )
+                else:
+                    await message.reply_text(
+                        "❌ Une erreur de communication s'est produite. "
+                        "Veuillez réessayer plus tard."
+                    )
+        except Exception as e:
+            logger.error(f"Error in handle_telegram_error: {str(e)}")
+
+    async def handle_generic_error(self, message: Message) -> None:
+        """Handle general errors with user-friendly messages"""
+        try:
+            await message.reply_text(
+                "❌ Une erreur inattendue s'est produite. "
+                "Veuillez réessayer plus tard."
+            )
+        except Exception as e:
+            logger.error(f"Error in handle_generic_error: {str(e)}")
+
+    def generate_instructions_message(self, verification_code: str) -> str:
+        """Generate instructions message for LinkedIn verification"""
+        return (
+            f"📝 Pour recevoir votre CV, veuillez :\n\n"
+            f"1. Cliquer sur le lien vers la publication LinkedIn\n"
+            f"2. Commenter avec le code : {verification_code}\n"
+            f"3. Revenir ici et cliquer sur 'J'ai commenté'\n\n"
+            f"⏳ Ce code est valable pendant 1 heure."
+        )
+
+    @staticmethod
+    def is_valid_email(email: str) -> bool:
+        """Validate email format"""
+        import re
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return bool(re.match(pattern, email))
+
+    def setup_handlers(self, application: Application) -> None:
+        """Register all command and callback handlers"""
+        application.add_handler(CommandHandler("start", self.start))
+        application.add_handler(CommandHandler("sendcv", self.send_cv))
+        application.add_handler(CommandHandler("myid", self.my_id))
+        application.add_handler(CallbackQueryHandler(self.callback_handler))
+
     
-    # Callback query handler
-    application.add_handler(CallbackQueryHandler(handler_instance.callback_handler))
-
-def initialize_handlers(redis_client, supabase_client):
-    """Initialize handler instance"""
-    return UserCommandHandler(redis_client, supabase_client)
