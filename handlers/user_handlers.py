@@ -66,13 +66,13 @@ class UserCommandHandler:
         supabase_client: Client,
         linkedin_config: LinkedInConfig,
         linkedin_token_manager: LinkedInTokenManager,
-        verification_manager: LinkedInVerificationManager  # Changed the parameter name for consistency
+        linkedin_verification_manager: LinkedInVerificationManager  # Match the name being passed
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
         self.linkedin_config = linkedin_config
         self.linkedin_token_manager = linkedin_token_manager
-        self.verification_manager = verification_manager  # Standardized the attribute name
+        self.verification_manager = linkedin_verification_manager 
 
 
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
