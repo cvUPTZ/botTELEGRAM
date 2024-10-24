@@ -127,29 +127,5 @@ if __name__ == "__main__":
     app.run(debug=True)
 
 
-
-# async def check_follow_status(access_token, company_id):
-#     headers = {
-#         "Authorization": f"Bearer {access_token}",
-#         "X-Restli-Protocol-Version": "2.0.0"
-#     }
-#     # LinkedIn API to check if a user follows a company (Make sure to have correct permissions)
-#     follow_check_url = f"https://api.linkedin.com/v2/me?projection=(followedCompanies)"
-
-#     response = await asyncio.to_thread(requests.get, follow_check_url, headers=headers)
-#     data = response.json()
-
-#     if response.status_code == 200:
-#         # Check if the user follows the specific company
-#         followed_companies = data.get('followedCompanies', [])
-#         for company in followed_companies:
-#             if company['id'] == str(company_id):
-#                 return True
-#         return False
-#     else:
-#         logger.error(f"Error checking follow status: {response.status_code}, {response.text}")
-#         return False
-
-
 if __name__ == "__main__":
     app.run(debug=True)
