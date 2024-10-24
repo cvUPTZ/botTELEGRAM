@@ -257,8 +257,8 @@ class UserCommandHandler:
         try:
             # Get verification code from callback data
             verification_code = query.data.split("_")[1]
-    
-            # Get stored verification data
+            
+            # Get stored verification data asynchronously
             stored_data = await self.get_stored_verification_data(user_id)
             
             # Check if verification data exists
@@ -267,19 +267,19 @@ class UserCommandHandler:
                     "❌ Session expirée. Veuillez recommencer avec /sendcv"
                 )
                 return
-    
+            
             # Store verification code in Redis for the verification manager
             await self.redis_client.set(
                 f"linkedin_verification_code:{user_id}",
                 verification_code,
                 ex=3600  # 1 hour expiry
             )
-    
+            
             await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
-    
-            # Verify the LinkedIn comment
+            
+            # Verify the LinkedIn comment asynchronously
             verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
-    
+            
             if verified:
                 # Send CV if verification successful
                 result = await send_email_with_cv(
@@ -289,7 +289,7 @@ class UserCommandHandler:
                     self.supabase
                 )
                 
-                # Clean up all verification data
+                # Clean up all verification data asynchronously
                 await self.cleanup_verification_data(user_id)
                 
                 # Update message with result
@@ -313,6 +313,7 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Unexpected error in verification process: {str(e)}")
             await self.handle_generic_error(query.message)
+
             
     async def store_verification_data(
         self,
