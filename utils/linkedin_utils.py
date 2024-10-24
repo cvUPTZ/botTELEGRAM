@@ -177,7 +177,7 @@ class LinkedInVerificationManager:
                     
                     return False
     
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:  # Changed from aiohttp.ClientTimeout
             logger.error("Request to LinkedIn API timed out.")
             raise LinkedInError("Request to LinkedIn API timed out.", LinkedInErrorCode.API_ERROR)
     
@@ -265,15 +265,23 @@ class LinkedInVerificationManager:
         except RedisError as e:
             logger.error(f"Redis error cleaning up verification data: {str(e)}")
 
-    async def _get_valid_access_token(self, user_id: int) -> Optional[str]:
-        """Get valid access token with fallback to config token"""
-        try:
-            # Note: get_token is still async as it might involve network operations
-            token = await self.token_manager.get_token(user_id)
-            return token if token else self.config.access_token
-        except Exception as e:
-            logger.error(f"Error getting access token: {str(e)}")
-            return self.config.access_token
+    async def get_token(self, user_id: int) -> Optional[str]:
+        """Get valid access token for user"""
+        token = await self.redis.get(f"{self.token_key_prefix}{user_id}")
+        if not token:
+            logger.debug(f"No token found for user {user_id}")
+            return None
+    
+        expiry = await self.redis.get(f"{self.token_expiry_prefix}{user_id}")
+        if not expiry:
+            logger.debug(f"No expiry found for user {user_id}")
+            return None
+            
+        if float(expiry.decode('utf-8')) < datetime.utcnow().timestamp():
+            logger.debug(f"Token expired for user {user_id}")
+            return None
+    
+        return token.decode('utf-8')
 
 class LinkedInTokenManager:
     """Manage LinkedIn access tokens"""
