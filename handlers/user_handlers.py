@@ -60,18 +60,17 @@ class RedisKeys:
     RATE_LIMIT = 'rate_limit:{}:{}'
 
 class UserCommandHandler:
-    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
-        
-    # Add rate limiting constants
-    MAX_ATTEMPTS = 5  # Maximum number of attempts allowed
-    RATE_LIMIT_WINDOW = 60 * 60  # Time window in seconds (1 hour)
+    ADMIN_IDS = [1719899525, 987654321]
+    MAX_ATTEMPTS = 5
+    RATE_LIMIT_WINDOW = 60 * 60  # 1 hour in seconds
+
     def __init__(
         self,
         redis_client: redis.Redis,
         supabase_client: Client,
         linkedin_config: LinkedInConfig,
         linkedin_token_manager: LinkedInTokenManager,
-        linkedin_verification_manager: LinkedInVerificationManager  # Match the name being passed
+        linkedin_verification_manager: LinkedInVerificationManager
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
@@ -90,20 +89,31 @@ class UserCommandHandler:
 
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
-        if user_id in self.ADMIN_IDS:
-            return True
-        
-        key = RedisKeys.RATE_LIMIT.format(user_id, command)
-        attempts = self.redis_client.get(key)
-        
-        if attempts and int(attempts) >= self.MAX_ATTEMPTS:
-            return False
-        self.redis_client.expire(key, self.RATE_LIMIT_WINDOW)
+        try:
+            if user_id in self.ADMIN_IDS:
+                return True
 
-        if not attempts:
-            self.redis_client.expire(key, self.rate_limit_window)
-        
-        return True
+            key = RedisKeys.RATE_LIMIT.format(user_id, command)
+            
+            # Get current attempts
+            attempts = await self.redis_client.get(key)
+            
+            if attempts is None:
+                # First attempt
+                await self.redis_client.setex(key, self.RATE_LIMIT_WINDOW, 1)
+                return True
+                
+            attempts = int(attempts)
+            if attempts >= self.MAX_ATTEMPTS:
+                return False
+                
+            # Increment attempts
+            await self.redis_client.incr(key)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking rate limit: {str(e)}")
+            return True  
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -247,72 +257,7 @@ class UserCommandHandler:
             )
         )
 
-    async def handle_linkedin_verification(
-        self,
-        query: Update.callback_query,
-        user_id: int,
-        context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """Handle LinkedIn verification process with improved error handling"""
-        try:
-            # Get verification code from callback data
-            verification_code = query.data.split("_")[1]
-            
-            # Get stored verification data asynchronously
-            stored_data = await self.get_stored_verification_data(user_id)
-            
-            # Check if verification data exists
-            if not all(stored_data.values()):
-                await query.message.edit_text(
-                    "❌ Session expirée. Veuillez recommencer avec /sendcv"
-                )
-                return
-            
-            # Store verification code in Redis for the verification manager
-            await self.redis_client.set(
-                f"linkedin_verification_code:{user_id}",
-                verification_code,
-                ex=3600  # 1 hour expiry
-            )
-            
-            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
-            
-            # Verify the LinkedIn comment asynchronously
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
-            
-            if verified:
-                # Send CV if verification successful
-                result = await send_email_with_cv(
-                    stored_data['email'],
-                    stored_data['cv_type'],
-                    user_id,
-                    self.supabase
-                )
-                
-                # Clean up all verification data asynchronously
-                await self.cleanup_verification_data(user_id)
-                
-                # Update message with result
-                await query.message.edit_text(result)
-            else:
-                await query.message.edit_text(message)
     
-        except RedisError as e:
-            logger.error(f"Redis error in verification process: {str(e)}")
-            await query.message.edit_text(
-                "❌ Erreur de stockage temporaire. Veuillez réessayer avec /sendcv"
-            )
-        except LinkedInError as e:
-            logger.error(f"LinkedIn error in verification process: {str(e)}")
-            await query.message.edit_text(
-                "❌ Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
-            )
-        except TelegramError as e:
-            logger.error(f"Telegram error in verification process: {str(e)}")
-            await self.handle_telegram_error(query.message, e)
-        except Exception as e:
-            logger.error(f"Unexpected error in verification process: {str(e)}")
-            await self.handle_generic_error(query.message)
 
             
     async def store_verification_data(
@@ -425,14 +370,16 @@ class UserCommandHandler:
         try:
             await query.answer()
             
-            if not await self.check_rate_limit(user_id, 'callback'):
-                await query.message.edit_text(
-                    "⚠️ Vous avez atteint la limite de vérifications. "
-                    "Veuillez réessayer plus tard."
-                )
-                return
-            
             if query.data.startswith("verify_"):
+                # Rate limit check for verification attempts
+                is_within_limit = await self.check_rate_limit(user_id, 'verification')
+                if not is_within_limit:
+                    await query.message.edit_text(
+                        "⚠️ Vous avez atteint la limite de vérifications. "
+                        "Veuillez réessayer dans 1 heure."
+                    )
+                    return
+                
                 await self.handle_linkedin_verification(query, user_id, context)
             else:
                 logger.warning(f"Unknown callback data: {query.data}")
@@ -444,6 +391,59 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Error in callback handler: {str(e)}")
             await self.handle_generic_error(query.message)
+
+    async def handle_linkedin_verification(
+        self,
+        query: Update.callback_query,
+        user_id: int,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle LinkedIn verification process"""
+        try:
+            verification_code = query.data.split("_")[1]
+            
+            # Get stored verification data
+            stored_data = await self.get_stored_verification_data(user_id)
+            
+            if not all(stored_data.values()):
+                await query.message.edit_text(
+                    "❌ Session expirée. Veuillez recommencer avec /sendcv"
+                )
+                return
+            
+            # Store verification code in Redis
+            await self.redis_client.setex(
+                f"linkedin_verification_code:{user_id}",
+                3600,  # 1 hour expiry
+                verification_code
+            )
+            
+            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
+            
+            # Verify LinkedIn comment
+            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+            
+            if verified:
+                # Send CV if verification successful
+                result = await send_email_with_cv(
+                    stored_data['email'],
+                    stored_data['cv_type'],
+                    user_id,
+                    self.supabase
+                )
+                
+                # Clean up verification data
+                await self.cleanup_verification_data(user_id)
+                
+                await query.message.edit_text(result)
+            else:
+                await query.message.edit_text(message)
+                
+        except Exception as e:
+            logger.error(f"Error in verification process: {str(e)}")
+            await query.message.edit_text(
+                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+            )
 
     async def handle_telegram_error(self, message: Message, error: TelegramError) -> None:
         """Handle Telegram-specific errors"""
