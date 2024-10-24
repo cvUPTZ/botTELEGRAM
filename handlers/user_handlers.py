@@ -57,6 +57,9 @@ class RedisKeys:
     CV_TYPE = 'linkedin_cv_type:{}'
     RATE_LIMIT = 'rate_limit:{}:{}'
 
+class UserCommandHandler:
+    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
+
     def __init__(
         self,
         redis_client: redis.Redis,
@@ -72,13 +75,14 @@ class RedisKeys:
         self.linkedin_token_manager = linkedin_token_manager or LinkedInTokenManager(redis_client, linkedin_config)  # Use the provided manager or create a new one
         self.rate_limit_window = rate_limit_window
         self.max_attempts = max_attempts
-
+    
         # Initialize LinkedIn managers
         self.verification_manager = LinkedInVerificationManager(
             redis_client,
             self.linkedin_token_manager,  # Use the initialized token manager
             linkedin_config
         )
+
 
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
