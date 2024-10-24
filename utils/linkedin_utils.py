@@ -152,7 +152,7 @@ class LinkedInVerificationManager:
         timeout: float = 10.0
     ) -> bool:
         """Check if verification code exists in post comments with timeout"""
-        url = f"https://api.linkedin.com/v2/socialActions/{self.config.post_id}/comments"
+        url = f"https://api.linkedin.com/v2/socialActions/7254038723820949505/comments"
         
         headers = {
             "Authorization": f"Bearer {access_token}",
