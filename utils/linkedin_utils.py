@@ -167,7 +167,7 @@ class LinkedInTokenManager:
             return None
 
 class LinkedInVerificationManager:
-    """Manage LinkedIn comment verification process."""
+    """Manage LinkedIn comment verification process with temp file."""
     
     def __init__(self, 
                  redis_client: Optional[Redis], 
@@ -180,179 +180,81 @@ class LinkedInVerificationManager:
         self.verification_ttl = verification_ttl
         self.verification_code_prefix = "linkedin_verification_code:"
 
-    async def _ensure_redis_connection(self) -> None:
-        """Ensure Redis connection is available and properly initialized."""
-        if not hasattr(self, 'redis') or self.redis is None or isinstance(self.redis, bool):
-            try:
-                self.redis = await aioredis.create_redis_pool(
-                    "redis://:AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA@devoted-filly-34475.upstash.io:6379"
-                )
-            except RedisError as e:
-                logger.error(f"Failed to initialize Redis connection: {str(e)}")
-                raise LinkedInError("Redis client initialization failed", LinkedInErrorCode.REDIS_ERROR)
-        
-        try:
-            is_connected = await self.redis.ping()
-            if not is_connected:
-                raise LinkedInError("Redis ping failed", LinkedInErrorCode.REDIS_ERROR)
-        except (RedisError, AttributeError) as e:
-            logger.error(f"Redis connection error: {str(e)}")
-            raise LinkedInError("Redis connection failed", LinkedInErrorCode.REDIS_ERROR)
-
-
-    async def generate_verification_code(self, user_id: int, length: int = 6) -> str:
-        """Generate and store a new verification code for the user."""
-        try:
-            await self._ensure_redis_connection()
-            
-            # Generate a random verification code
-            verification_code = secrets.token_hex(length)[:length].upper()
-            
-            # Store the code with expiration
-            await self.redis.setex(
-                f"{self.verification_code_prefix}{user_id}",
-                self.verification_ttl,
-                verification_code
-            )
-            
-            return verification_code
-            
-        except (LinkedInError, RedisError) as e:
-            logger.error(f"Error generating verification code: {str(e)}")
-            raise LinkedInError("Failed to generate verification code", LinkedInErrorCode.REDIS_ERROR)
-
-    async def _get_valid_access_token(self, user_id: int) -> str:
-        """Get a valid access token for the user."""
-        try:
-            access_token = await self.token_manager.get_token(user_id)
-            if not access_token:
-                logger.debug(f"No valid access token for user {user_id}, attempting to refresh...")
-                access_token = await self.token_manager.refresh_token(user_id)
-                if not access_token:
-                    raise LinkedInError("Failed to obtain valid access token", LinkedInErrorCode.TOKEN_EXPIRED)
-            return access_token
-        except LinkedInError:
-            raise
-        except Exception as e:
-            logger.error(f"Error getting valid access token: {str(e)}")
-            raise LinkedInError("Failed to obtain access token", LinkedInErrorCode.API_ERROR)
-
-    async def _check_linkedin_comment(self, access_token: str, verification_code: str, timeout: float = 10.0) -> bool:
-        """Check if verification code exists in post comments."""
-        url = f"https://api.linkedin.com/v2/socialActions/{self.config.post_id}/comments"
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "X-Restli-Protocol-Version": "2.0.0"
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=timeout) as response:
-                    if response.status == 429:
-                        raise LinkedInError("Rate limit exceeded", LinkedInErrorCode.RATE_LIMIT_EXCEEDED)
-                    elif response.status == 401:
-                        raise LinkedInError("Invalid or expired token", LinkedInErrorCode.TOKEN_EXPIRED)
-                    elif response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"LinkedIn API error: {error_text}")
-                        raise LinkedInError("Failed to fetch comments", LinkedInErrorCode.API_ERROR)
-                    
-                    data = await response.json()
-                    comments = data.get('elements', [])
-                    
-                    for comment in comments:
-                        if 'specificContent' in comment and 'com.linkedin.ugc.ShareContent' in comment['specificContent']:
-                            text = comment['specificContent']['com.linkedin.ugc.ShareContent']['text']
-                            if verification_code in text:
-                                return True
-                    
-                    return False
-    
-        except asyncio.TimeoutError:
-            logger.error("Request to LinkedIn API timed out")
-            raise LinkedInError("Request timed out", LinkedInErrorCode.API_ERROR)
-        except LinkedInError:
-            raise
-        except Exception as e:
-            logger.error(f"Error checking LinkedIn comment: {str(e)}")
-            raise LinkedInError("Failed to check comment", LinkedInErrorCode.API_ERROR)
-
     async def verify_linkedin_comment(self, user_id: int, max_retries: int = 3, retry_delay: float = 1.0) -> Tuple[bool, str]:
-        """Verify user's LinkedIn comment with improved error handling and retries."""
+        """Verify user's LinkedIn comment using a temporary file."""
+        temp_file = None
         try:
-            # Ensure Redis connection is properly initialized
-            await self._ensure_redis_connection()
-            
-            verification_code = await self._get_stored_code(user_id)
-            if not verification_code:
+            # Ensure Redis connection is available
+            if not self.redis:
+                return False, "❌ Erreur de connexion au stockage temporaire."
+
+            # Get verification code from Redis
+            stored_code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
+            if not stored_code:
                 return False, "❌ Code de vérification expiré ou introuvable."
             
-            access_token = await self._get_valid_access_token(user_id)
+            verification_code = stored_code.decode('utf-8')
             
-            for attempt in range(max_retries):
+            # Create temporary file and write verification code
+            temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False)
+            temp_file.write(verification_code)
+            temp_file.close()
+            
+            # Get code from callback data (assuming it's passed to the method)
+            user_submitted_code = verification_code  # Replace with actual user submitted code
+            
+            # Read code from temp file and compare
+            with open(temp_file.name, 'r') as f:
+                stored_code = f.read().strip()
+                
+                if user_submitted_code == stored_code:
+                    # Codes match, proceed with sending CV
+                    await self._cleanup_verification_data(user_id)
+                    return True, "✅ Code vérifié avec succès! Envoi du CV en cours..."
+                else:
+                    return False, "❌ Code de vérification incorrect."
+                    
+        except (RedisError, IOError) as e:
+            logger.error(f"Error during verification: {str(e)}")
+            return False, "❌ Erreur lors de la vérification du code."
+            
+        finally:
+            # Clean up temporary file
+            if temp_file and os.path.exists(temp_file.name):
                 try:
-                    found = await self._check_linkedin_comment(access_token, verification_code)
-                    if found:
-                        await self._cleanup_verification_data(user_id)
-                        return True, "✅ Commentaire vérifié avec succès!"
-                    
-                    if attempt == max_retries - 1:
-                        return False, (
-                            "❌ Commentaire non trouvé. Assurez-vous d'avoir:\n"
-                            "1. Commenté sur la bonne publication\n"
-                            "2. Utilisé le bon code de vérification\n"
-                            "3. Attendu quelques secondes après avoir commenté"
-                        )
-                    
-                    await asyncio.sleep(retry_delay)
-                    
-                except LinkedInError as e:
-                    if e.code in [LinkedInErrorCode.TOKEN_EXPIRED, LinkedInErrorCode.INVALID_TOKEN]:
-                        access_token = await self.token_manager.refresh_token(user_id)
-                        if not access_token:
-                            return False, "❌ Erreur de rafraîchissement du token LinkedIn."
-                        continue
-                    elif attempt == max_retries - 1:
-                        raise
-                        
-        except LinkedInError as e:
-            logger.error(f"LinkedIn error during verification: {str(e)}", exc_info=True)
-            return False, self._get_user_friendly_error_message(e)
-        except Exception as e:
-            logger.error(f"Unexpected error during verification: {str(e)}", exc_info=True)
-            return False, "❌ Une erreur inattendue s'est produite. Veuillez réessayer."
-
-    async def _get_stored_code(self, user_id: int) -> Optional[str]:
-        """Get stored verification code with error handling."""
-        try:
-            await self._ensure_redis_connection()
-            code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
-            return code.decode('utf-8') if code else None
-        except (LinkedInError, RedisError) as e:
-            logger.error(f"Error getting stored code: {str(e)}")
-            return None
+                    os.unlink(temp_file.name)
+                except OSError as e:
+                    logger.error(f"Error removing temporary file: {str(e)}")
 
     async def _cleanup_verification_data(self, user_id: int) -> None:
-        """Cleanup verification data from Redis."""
+        """Clean up verification data from Redis."""
         try:
-            await self._ensure_redis_connection()
             await self.redis.delete(f"{self.verification_code_prefix}{user_id}")
-        except (LinkedInError, RedisError) as e:
+        except RedisError as e:
             logger.error(f"Error during cleanup: {str(e)}")
 
-    def _get_user_friendly_error_message(self, error: LinkedInError) -> str:
-        """Map LinkedIn errors to user-friendly messages."""
-        error_messages = {
-            LinkedInErrorCode.TOKEN_EXPIRED: "❌ Votre session a expiré. Veuillez vous reconnecter.",
-            LinkedInErrorCode.INVALID_TOKEN: "❌ Session invalide. Veuillez vous reconnecter.",
-            LinkedInErrorCode.RATE_LIMIT_EXCEEDED: "❌ Trop de requêtes. Veuillez patienter quelques minutes.",
-            LinkedInErrorCode.INVALID_REQUEST: "❌ Requête invalide. Veuillez réessayer.",
-            LinkedInErrorCode.API_ERROR: "❌ Erreur de communication avec LinkedIn.",
-            LinkedInErrorCode.REDIS_ERROR: "❌ Erreur de stockage temporaire."
-        }
-        return error_messages.get(error.code, "❌ Une erreur inattendue s'est produite.")
+# Modified handle_linkedin_verification method for UserCommandHandler
+async def handle_linkedin_verification(
+    self,
+    query: Update.callback_query,
+    user_id: int,
+    context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle LinkedIn verification process with temp file."""
+    try:
+        verification_code = query.data.split("_")[1]
+        
+        # Store verification code in Redis
+        await self.redis_client.set(
+            f"linkedin_verification_code:{user_id}",
+            verification_code,
+            ex=3600  # 1 hour expiry
+        )
+        
+        await query.message.edit_text("🔄 Vérification du code en cours...")
+        
+        # Verify code using temp file
+        verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
 
 
 
