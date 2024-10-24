@@ -58,7 +58,6 @@ class RedisKeys:
     RATE_LIMIT = 'rate_limit:{}:{}'
 
 class UserCommandHandler:
-    """Handle user commands and interactions with improved error handling"""
     def __init__(
         self,
         redis_client: redis.Redis,
@@ -69,6 +68,7 @@ class UserCommandHandler:
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
+        self.linkedin_config = linkedin_config
         self.rate_limit_window = rate_limit_window
         self.max_attempts = max_attempts
         
@@ -79,7 +79,6 @@ class UserCommandHandler:
             self.token_manager,
             linkedin_config
         )
-
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
         key = RedisKeys.RATE_LIMIT.format(user_id, command)
