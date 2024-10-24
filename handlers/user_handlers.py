@@ -58,6 +58,8 @@ class RedisKeys:
     RATE_LIMIT = 'rate_limit:{}:{}'
 
 class UserCommandHandler:
+    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
+
     def __init__(
         self,
         redis_client: redis.Redis,
@@ -79,7 +81,7 @@ class UserCommandHandler:
             self.token_manager,
             linkedin_config
         )
-    ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
+
 
     
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
