@@ -1,17 +1,18 @@
 from flask import Flask, request, jsonify, redirect
 from telegram import Update
 from main import create_application
-from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL,COMPANY_PAGE_ID, LINKEDIN_ACCESS_TOKEN # Add this to your config
+from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, REDIS_URL, COMPANY_PAGE_ID, LINKEDIN_ACCESS_TOKEN
 import asyncio
 import requests
-from jwt import PyJWKClient
-import jwt
-import json
-# from utils.linkedin_utils import exchange_code_for_tokens, check_follow_status
-from utils.email_utils import send_email_with_cv
+import logging
 import redis
+from utils.email_utils import send_email_with_cv
 
 app = Flask(__name__)
+
+# Logger setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Redis client for storing user information
 redis_client = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
@@ -26,20 +27,19 @@ async def webhook():
         if request.method == "POST":
             application = create_application()
             await application.initialize()
-            
+
             update = Update.de_json(request.get_json(force=True), application.bot)
             await application.process_update(update)
-            
+
             await application.shutdown()
             return jsonify({"status": "ok"})
-            
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}")
         return jsonify({
             "status": "error",
             "message": "An error occurred processing the webhook"
         }), 500
-        
+
     return jsonify({"status": "error", "message": "Invalid request method"}), 405
 
 
@@ -63,16 +63,16 @@ async def linkedin_callback():
     try:
         user_id, cv_type, email = state.split('|')
         tokens = await exchange_code_for_tokens(code)
-        
+
         if not tokens.get('access_token'):
             return "Failed to get access token", 400
 
         verification_status = await verify_linkedin_comment(user_id)
-        
+
         if verification_status:
             # Mark as verified in Redis
             redis_client.set(f"linkedin_verified:{user_id}", "true", ex=3600)
-            
+
             try:
                 result = await send_email_with_cv(email, cv_type, int(user_id))
                 return "Vérification réussie ! Votre CV a été envoyé. Vous pouvez fermer cette fenêtre et retourner au bot Telegram."
@@ -102,10 +102,10 @@ async def check_linkedin_comment(access_token, post_id, verification_code, user_
     headers = {"Authorization": f"Bearer {access_token}"}
 
     response = await asyncio.to_thread(requests.get, comments_url, headers=headers)
-    
+
     if response.status_code == 200:
         comments = response.json().get('elements', [])
-        
+
         # Check if any comment contains the verification code
         for comment in comments:
             actor_id = comment.get('actor', {}).get('id')
@@ -115,9 +115,6 @@ async def check_linkedin_comment(access_token, post_id, verification_code, user_
                 return True
 
     return False
-
-
-
 
 async def verify_linkedin_code(update, context):
     user_id = update.effective_user.id
@@ -130,11 +127,6 @@ async def verify_linkedin_code(update, context):
         await send_email_with_cv(context.args[1], context.args[2], user_id)
     else:
         await update.message.reply_text("❌ Code incorrect ou expiré. Veuillez réessayer.")
-
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
 
 
 if __name__ == "__main__":
