@@ -1,11 +1,9 @@
 import logging
 import aiohttp
-import json
+from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
-
-import redis
-from redis import Redis
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,65 +129,97 @@ class LinkedInTokenManager:
         return token.decode('utf-8') if token else None
 
 class LinkedInVerificationManager:
-    """Manage LinkedIn comment verification process"""
+    """Manage LinkedIn comment verification process with improved async handling"""
     
     def __init__(
         self,
         redis_client: Redis,
-        token_manager: LinkedInTokenManager,
-        config: LinkedInConfig
+        token_manager: 'LinkedInTokenManager',
+        config: 'LinkedInConfig',
+        verification_ttl: int = 3600
     ):
         self.redis = redis_client
         self.token_manager = token_manager
         self.config = config
-        self.verification_ttl = 3600  # 1 hour
+        self.verification_ttl = verification_ttl
         
     async def verify_linkedin_comment(
         self,
-        user_id: int
+        user_id: int,
+        max_retries: int = 3,
+        retry_delay: float = 1.0
     ) -> Tuple[bool, str]:
-        """Verify user's LinkedIn comment"""
+        """
+        Verify user's LinkedIn comment with improved error handling and retries
+        
+        Args:
+            user_id: The user's ID
+            max_retries: Maximum number of API retry attempts
+            retry_delay: Delay between retries in seconds
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
         try:
             # Get stored verification data
-            verification_code = await self.get_stored_code(user_id)
+            verification_code = await self._get_stored_code(user_id)
             if not verification_code:
                 return False, "❌ Code de vérification expiré ou introuvable."
             
-            # Get access token
-            access_token = await self.token_manager.get_token(user_id)
+            # Get access token with fallback
+            access_token = await self._get_valid_access_token(user_id)
             if not access_token:
-                access_token = self.config.access_token
+                return False, "❌ Erreur d'authentification LinkedIn."
             
-            # Check for comment
-            found = await self._check_linkedin_comment(
-                access_token,
-                verification_code
-            )
-            
-            if found:
-                return True, "✅ Commentaire vérifié avec succès!"
-            else:
-                return False, (
-                    "❌ Commentaire non trouvé. Assurez-vous d'avoir:\n"
-                    "1. Commenté sur la bonne publication\n"
-                    "2. Utilisé le bon code de vérification\n"
-                    "3. Attendu quelques secondes après avoir commenté"
-                )
-                
+            # Check for comment with retries
+            for attempt in range(max_retries):
+                try:
+                    found = await self._check_linkedin_comment(
+                        access_token,
+                        verification_code
+                    )
+                    
+                    if found:
+                        await self._cleanup_verification_data(user_id)
+                        return True, "✅ Commentaire vérifié avec succès!"
+                        
+                    if attempt == max_retries - 1:
+                        return False, (
+                            "❌ Commentaire non trouvé. Assurez-vous d'avoir:\n"
+                            "1. Commenté sur la bonne publication\n"
+                            "2. Utilisé le bon code de vérification\n"
+                            "3. Attendu quelques secondes après avoir commenté"
+                        )
+                    
+                    await asyncio.sleep(retry_delay)
+                    
+                except LinkedInError as e:
+                    if e.code in [LinkedInErrorCode.TOKEN_EXPIRED, LinkedInErrorCode.INVALID_TOKEN]:
+                        access_token = await self.token_manager.refresh_token(user_id)
+                        if not access_token:
+                            return False, "❌ Erreur de rafraîchissement du token LinkedIn."
+                    elif attempt == max_retries - 1:
+                        raise
+                        
         except LinkedInError as e:
-            logger.error(f"LinkedIn error during verification: {str(e)}")
-            return False, f"❌ Erreur LinkedIn: {e.message}"
+            logger.error(f"LinkedIn error during verification: {str(e)}", exc_info=True)
+            return False, self._get_user_friendly_error_message(e)
+            
+        except RedisError as e:
+            logger.error(f"Redis error during verification: {str(e)}", exc_info=True)
+            return False, "❌ Erreur temporaire de stockage. Veuillez réessayer."
             
         except Exception as e:
-            logger.error(f"Error during verification: {str(e)}")
-            return False, "❌ Une erreur s'est produite lors de la vérification."
+            logger.error(f"Unexpected error during verification: {str(e)}", exc_info=True)
+            return False, "❌ Une erreur inattendue s'est produite. Veuillez réessayer."
 
     async def _check_linkedin_comment(
         self,
         access_token: str,
-        verification_code: str
+        verification_code: str,
+        timeout: float = 10.0
     ) -> bool:
-        """Check if verification code exists in post comments"""
+        """Check if verification code exists in post comments with timeout"""
         try:
             async with aiohttp.ClientSession() as session:
                 headers = {
@@ -204,20 +234,27 @@ class LinkedInVerificationManager:
                     f"{self.config.post_id}/comments"
                 )
                 
-                async with session.get(url, headers=headers) as response:
-                    if response.status != 200:
+                async with session.get(url, headers=headers, timeout=timeout) as response:
+                    if response.status == 429:
                         raise LinkedInError(
-                            "Failed to fetch comments",
+                            "Rate limit exceeded",
+                            LinkedInErrorCode.RATE_LIMIT_EXCEEDED
+                        )
+                    elif response.status == 401:
+                        raise LinkedInError(
+                            "Invalid token",
+                            LinkedInErrorCode.INVALID_TOKEN
+                        )
+                    elif response.status != 200:
+                        raise LinkedInError(
+                            f"API error (status {response.status})",
                             LinkedInErrorCode.API_ERROR
                         )
                         
                     data = await response.json()
-                    
-                    # Check comments for verification code
-                    elements = data.get('elements', [])
-                    return any(
-                        verification_code in comment.get('message', {}).get('text', '')
-                        for comment in elements
+                    return self._find_verification_code_in_comments(
+                        data.get('elements', []),
+                        verification_code
                     )
                     
         except aiohttp.ClientError as e:
@@ -226,51 +263,54 @@ class LinkedInVerificationManager:
                 "Network error when checking comment",
                 LinkedInErrorCode.API_ERROR
             )
-            
-        except Exception as e:
-            logger.error(f"Error checking LinkedIn comment: {str(e)}")
-            raise LinkedInError(
-                "Error checking comment",
-                LinkedInErrorCode.API_ERROR
-            )
 
-    async def store_verification_data(
-        self,
-        user_id: int,
-        verification_code: str
-    ) -> None:
-        """Store verification data in Redis"""
+    async def _get_stored_code(self, user_id: int) -> Optional[str]:
+        """Get stored verification code with error handling"""
         try:
-            # Use a coroutine-friendly way to set Redis key
-            await self.redis.setex(
-                f"linkedin_verification_code:{user_id}",
-                self.verification_ttl,
-                verification_code
-            )
-        except AttributeError:
-            # Fallback for synchronous Redis client
-            self.redis.setex(
-                f"linkedin_verification_code:{user_id}",
-                self.verification_ttl,
-                verification_code
-            )
-
-    async def get_stored_code(self, user_id: int) -> Optional[str]:
-        """Get stored verification code"""
-        try:
-            # Try async Redis get
             code = await self.redis.get(f"linkedin_verification_code:{user_id}")
-        except AttributeError:
-            # Fallback for synchronous Redis client
-            code = self.redis.get(f"linkedin_verification_code:{user_id}")
-        
-        return code.decode('utf-8') if code else None
+            return code.decode('utf-8') if code else None
+        except RedisError as e:
+            logger.error(f"Redis error getting stored code: {str(e)}")
+            return None
 
-    async def cleanup_verification_data(self, user_id: int) -> None:
-        """Clean up verification data from Redis"""
+    async def _cleanup_verification_data(self, user_id: int) -> None:
+        """Clean up verification data from Redis with error handling"""
         try:
-            # Try async Redis delete
             await self.redis.delete(f"linkedin_verification_code:{user_id}")
-        except AttributeError:
-            # Fallback for synchronous Redis client
-            self.redis.delete(f"linkedin_verification_code:{user_id}")
+        except RedisError as e:
+            logger.error(f"Redis error cleaning up verification data: {str(e)}")
+
+    async def _get_valid_access_token(self, user_id: int) -> Optional[str]:
+        """Get valid access token with fallback to config token"""
+        try:
+            token = await self.token_manager.get_token(user_id)
+            return token if token else self.config.access_token
+        except Exception as e:
+            logger.error(f"Error getting access token: {str(e)}")
+            return self.config.access_token
+
+    @staticmethod
+    def _find_verification_code_in_comments(
+        comments: List[Dict[str, Any]],
+        verification_code: str
+    ) -> bool:
+        """Safely search for verification code in comments"""
+        try:
+            return any(
+                verification_code in comment.get('message', {}).get('text', '')
+                for comment in comments
+            )
+        except Exception as e:
+            logger.error(f"Error parsing comments: {str(e)}")
+            return False
+
+    @staticmethod
+    def _get_user_friendly_error_message(error: LinkedInError) -> str:
+        """Convert LinkedIn errors to user-friendly messages"""
+        error_messages = {
+            LinkedInErrorCode.TOKEN_EXPIRED: "❌ Session LinkedIn expirée. Veuillez réessayer.",
+            LinkedInErrorCode.INVALID_TOKEN: "❌ Erreur d'authentification LinkedIn.",
+            LinkedInErrorCode.RATE_LIMIT_EXCEEDED: "❌ Trop de requêtes. Veuillez patienter quelques minutes.",
+            LinkedInErrorCode.API_ERROR: "❌ Erreur de communication avec LinkedIn. Veuillez réessayer."
+        }
+        return error_messages.get(error.code, "❌ Une erreur s'est produite. Veuillez réessayer.")
