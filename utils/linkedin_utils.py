@@ -126,8 +126,9 @@ class LinkedInTokenManager:
 
     async def get_refresh_token(self, user_id: int) -> Optional[str]:
         """Get refresh token for user"""
-        token = self.redis.get(f"linkedin_refresh_token:{user_id}")
+        token = await self.redis.get(f"linkedin_refresh_token:{user_id}")
         return token.decode('utf-8') if token else None
+
 
 class LinkedInVerificationManager:
     """Manage LinkedIn comment verification process with improved async handling"""
