@@ -58,9 +58,9 @@ class UserCommandHandler:
             logger.error(f"Error sending start message: {str(e)}")
             await update.message.reply_text("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
 
-    @private_chat_only
-    async def admin_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle LinkedIn authentication for admins"""
+    
+    async def admin_auth_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Command handler for admin authentication"""
         user_id = update.effective_user.id
         
         if user_id not in ADMIN_USER_IDS:
@@ -68,22 +68,52 @@ class UserCommandHandler:
             return
             
         try:
-            auth_url = self.auth_manager.get_auth_url()
+            auth_manager = LinkedInAuthManager(context.bot_data.get('redis_client'))
+            auth_url = auth_manager.get_auth_url()
+            
             keyboard = [[InlineKeyboardButton("🔐 Authentifier LinkedIn", url=auth_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                "🔄 Veuillez suivre ces étapes:\n\n"
+                "🔄 Pour ré-authentifier LinkedIn, suivez ces étapes:\n\n"
                 "1. Cliquez sur le bouton ci-dessous\n"
                 "2. Connectez-vous à LinkedIn\n"
                 "3. Autorisez l'application\n"
                 "4. Copiez le code de la redirection\n"
-                "5. Utilisez /auth_callback [code] pour terminer",
+                "5. Utilisez /auth_callback [code] pour terminer\n\n"
+                "⚠️ Cette authentification est nécessaire pour vérifier les commentaires LinkedIn.",
                 reply_markup=reply_markup
             )
         except Exception as e:
-            logger.error(f"Error in admin_auth: {str(e)}")
+            logger.error(f"Error in admin_auth command: {str(e)}")
             await update.message.reply_text("❌ Une erreur s'est produite lors de l'authentification.")
+            
+    # @private_chat_only
+    # async def admin_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    #     """Handle LinkedIn authentication for admins"""
+    #     user_id = update.effective_user.id
+        
+    #     if user_id not in ADMIN_USER_IDS:
+    #         await update.message.reply_text('❌ Cette commande est réservée aux administrateurs.')
+    #         return
+            
+    #     try:
+    #         auth_url = self.auth_manager.get_auth_url()
+    #         keyboard = [[InlineKeyboardButton("🔐 Authentifier LinkedIn", url=auth_url)]]
+    #         reply_markup = InlineKeyboardMarkup(keyboard)
+            
+    #         await update.message.reply_text(
+    #             "🔄 Veuillez suivre ces étapes:\n\n"
+    #             "1. Cliquez sur le bouton ci-dessous\n"
+    #             "2. Connectez-vous à LinkedIn\n"
+    #             "3. Autorisez l'application\n"
+    #             "4. Copiez le code de la redirection\n"
+    #             "5. Utilisez /auth_callback [code] pour terminer",
+    #             reply_markup=reply_markup
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Error in admin_auth: {str(e)}")
+    #         await update.message.reply_text("❌ Une erreur s'est produite lors de l'authentification.")
 
     @private_chat_only
     async def auth_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -344,7 +374,7 @@ def setup_handlers(application, handler_instance: UserCommandHandler):
     application.add_handler(CommandHandler("start", handler_instance.start))
     application.add_handler(CommandHandler("sendcv", handler_instance.send_cv))
     application.add_handler(CommandHandler("myid", handler_instance.my_id))
-    application.add_handler(CommandHandler("admin_auth", handler_instance.admin_auth))
+    application.add_handler(CommandHandler("admin_auth", handler_instance.admin_auth_command))
     application.add_handler(CommandHandler("auth_callback", handler_instance.auth_callback))
     
     # Callback query handler
