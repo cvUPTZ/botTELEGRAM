@@ -338,12 +338,13 @@ class UserCommandHandler:
                 cv_type
             )
             
-            # Execute pipeline
-            await pipeline.execute()
+            # Execute pipeline (no await here)
+            pipeline.execute()
             
         except Exception as e:
             logger.error(f"Error storing verification data: {str(e)}")
             raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
+
 
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
