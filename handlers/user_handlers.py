@@ -60,7 +60,7 @@ class RedisKeys:
 class UserCommandHandler:
     ADMIN_IDS = [1719899525, 987654321]  # Add your actual admin user IDs here
 
-        def __init__(
+    def __init__(
         self,
         redis_client: redis.Redis,
         supabase_client: Client,
