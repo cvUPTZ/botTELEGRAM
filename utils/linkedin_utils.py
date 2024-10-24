@@ -6,52 +6,70 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict, Any
-from config import (
-    REDIS_URL,
-    LINKEDIN_CLIENT_ID,
-    LINKEDIN_CLIENT_SECRET,
-    LINKEDIN_REDIRECT_URI,
-    LINKEDIN_POST_ID,
-    VERIFICATION_CODE_LENGTH,
-    TOKEN_EXPIRY_BUFFER_MINUTES,
-    API_TIMEOUT_SECONDS
-)
+from dataclasses import dataclass
+from enum import Enum
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Redis key constants
-REDIS_KEYS = {
-    'TOKEN': 'linkedin_token',
-    'AUTH_NEEDED': 'linkedin_auth_needed',
-    'VERIFICATION_CODE': 'linkedin_verification_code:{}',
-    'CODE_TIMESTAMP': 'linkedin_code_timestamp:{}',
-    'EMAIL': 'linkedin_email:{}',
-    'CV_TYPE': 'linkedin_cv_type:{}'
-}
+class LinkedInErrorCode(Enum):
+    """Enum for LinkedIn API error codes"""
+    AUTH_ERROR = "auth_error"
+    RATE_LIMIT = "rate_limit"
+    NETWORK_ERROR = "network_error"
+    TIMEOUT = "timeout"
+    INVALID_REQUEST = "invalid_request"
+    SERVER_ERROR = "server_error"
+    UNKNOWN = "unknown"
+
+@dataclass
+class LinkedInConfig:
+    """Configuration class for LinkedIn API"""
+    client_id: str
+    client_secret: str
+    redirect_uri: str
+    post_id: str
+    verification_code_length: int
+    token_expiry_buffer_minutes: int
+    api_timeout_seconds: int
 
 class LinkedInError(Exception):
     """Base exception for LinkedIn-related errors"""
-    pass
+    def __init__(self, message: str, error_code: LinkedInErrorCode = LinkedInErrorCode.UNKNOWN):
+        self.error_code = error_code
+        super().__init__(message)
 
 class LinkedInAPIError(LinkedInError):
     """Specific exception for API errors"""
-    def __init__(self, status_code: int, message: str):
+    def __init__(self, status_code: int, message: str, error_code: LinkedInErrorCode):
         self.status_code = status_code
-        super().__init__(message)
+        super().__init__(message, error_code)
+
+class RedisKeys:
+    """Redis key constants"""
+    TOKEN = 'linkedin_token'
+    AUTH_NEEDED = 'linkedin_auth_needed'
+    VERIFICATION_CODE = 'linkedin_verification_code:{}'
+    CODE_TIMESTAMP = 'linkedin_code_timestamp:{}'
+    EMAIL = 'linkedin_email:{}'
+    CV_TYPE = 'linkedin_cv_type:{}'
 
 class LinkedInAuthManager:
     """Handle LinkedIn authentication flow with improved error handling"""
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: redis.Redis, config: LinkedInConfig):
         self.redis_client = redis_client
+        self.config = config
 
     def get_auth_url(self) -> str:
         """Generate LinkedIn authorization URL"""
         params = {
             'response_type': 'code',
-            'client_id': LINKEDIN_CLIENT_ID,
-            'redirect_uri': LINKEDIN_REDIRECT_URI,
+            'client_id': self.config.client_id,
+            'redirect_uri': self.config.redirect_uri,
             'scope': 'r_organization_social w_organization_social r_member_social'
         }
         query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
@@ -64,23 +82,29 @@ class LinkedInAuthManager:
                 data = {
                     'grant_type': 'authorization_code',
                     'code': code,
-                    'client_id': LINKEDIN_CLIENT_ID,
-                    'client_secret': LINKEDIN_CLIENT_SECRET,
-                    'redirect_uri': LINKEDIN_REDIRECT_URI
+                    'client_id': self.config.client_id,
+                    'client_secret': self.config.client_secret,
+                    'redirect_uri': self.config.redirect_uri
                 }
                 
                 async with session.post(
                     'https://www.linkedin.com/oauth/v2/accessToken',
                     data=data,
-                    timeout=API_TIMEOUT_SECONDS
+                    timeout=self.config.api_timeout_seconds
                 ) as response:
                     if response.status == 401:
-                        logger.error("Invalid authorization code")
-                        return False, "Code d'autorisation invalide"
+                        raise LinkedInAPIError(
+                            401,
+                            "Invalid authorization code",
+                            LinkedInErrorCode.AUTH_ERROR
+                        )
                     
                     if response.status != 200:
-                        logger.error(f"LinkedIn API error: {response.status}")
-                        return False, "Erreur lors de l'authentification LinkedIn"
+                        raise LinkedInAPIError(
+                            response.status,
+                            f"LinkedIn API error: {response.status}",
+                            LinkedInErrorCode.SERVER_ERROR
+                        )
                     
                     token_data = await response.json()
                     expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
@@ -91,79 +115,79 @@ class LinkedInAuthManager:
                         'expires_at': expires_at.isoformat()
                     }
                     
-                    self.redis_client.set(REDIS_KEYS['TOKEN'], json.dumps(token_info))
-                    self.redis_client.delete(REDIS_KEYS['AUTH_NEEDED'])
+                    self.redis_client.set(RedisKeys.TOKEN, json.dumps(token_info))
+                    self.redis_client.delete(RedisKeys.AUTH_NEEDED)
                     
                     logger.info("LinkedIn token initialized successfully")
-                    return True, "Authentification LinkedIn réussie"
+                    return True, "Authentication successful"
                     
+        except LinkedInAPIError as e:
+            logger.error(f"LinkedIn API error: {str(e)}")
+            return False, str(e)
         except Exception as e:
             logger.error(f"Error initializing token: {str(e)}")
-            return False, "Erreur technique lors de l'authentification"
+            return False, "Technical error during authentication"
 
-class TokenManager:
+class LinkedInTokenManager:
     """Handle LinkedIn token management with improved error handling"""
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: redis.Redis, config: LinkedInConfig):
         self.redis_client = redis_client
+        self.config = config
 
     async def get_valid_token(self) -> Optional[str]:
         """Get a valid LinkedIn access token, refreshing if necessary"""
         try:
-            token_data = self.redis_client.get(REDIS_KEYS['TOKEN'])
+            token_data = self.redis_client.get(RedisKeys.TOKEN)
             
             if not token_data:
                 logger.info("No token found, setting auth needed flag")
-                self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+                self.redis_client.setex(RedisKeys.AUTH_NEEDED, 3600, '1')
                 return None
                 
             token_info = json.loads(token_data)
             expires_at = datetime.fromisoformat(token_info['expires_at'])
             
-            # Check if token is about to expire
-            if expires_at - timedelta(minutes=TOKEN_EXPIRY_BUFFER_MINUTES) > datetime.utcnow():
+            if expires_at - timedelta(minutes=self.config.token_expiry_buffer_minutes) > datetime.utcnow():
                 return token_info['access_token']
             
-            # Try to refresh token
             if 'refresh_token' in token_info:
                 logger.info("Token expired, attempting refresh")
-                new_token = await self.refresh_token(token_info['refresh_token'])
-                if new_token:
-                    return new_token
+                return await self.refresh_token(token_info['refresh_token'])
             
-            # If refresh fails or no refresh token, set auth needed flag
             logger.info("Token refresh failed, setting auth needed flag")
-            self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+            self.redis_client.setex(RedisKeys.AUTH_NEEDED, 3600, '1')
             return None
             
-        except (json.JSONDecodeError, KeyError) as e:
+        except json.JSONDecodeError as e:
             logger.error(f"Invalid token data in Redis: {str(e)}")
-            self.redis_client.delete(REDIS_KEYS['TOKEN'])
-            self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+            self.cleanup_token_data()
             return None
-            
         except Exception as e:
             logger.error(f"Error in get_valid_token: {str(e)}")
             return None
 
     async def refresh_token(self, refresh_token: str) -> Optional[str]:
-        """Refresh LinkedIn access token with improved error handling"""
+        """Refresh LinkedIn access token"""
         try:
             async with aiohttp.ClientSession() as session:
                 data = {
                     'grant_type': 'refresh_token',
                     'refresh_token': refresh_token,
-                    'client_id': LINKEDIN_CLIENT_ID,
-                    'client_secret': LINKEDIN_CLIENT_SECRET
+                    'client_id': self.config.client_id,
+                    'client_secret': self.config.client_secret
                 }
                 
                 async with session.post(
                     'https://www.linkedin.com/oauth/v2/accessToken',
                     data=data,
-                    timeout=API_TIMEOUT_SECONDS
+                    timeout=self.config.api_timeout_seconds
                 ) as response:
                     if response.status != 200:
-                        logger.error(f"Token refresh failed: {response.status}")
-                        return None
+                        raise LinkedInAPIError(
+                            response.status,
+                            "Token refresh failed",
+                            LinkedInErrorCode.AUTH_ERROR
+                        )
                     
                     token_data = await response.json()
                     expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
@@ -174,35 +198,41 @@ class TokenManager:
                         'expires_at': expires_at.isoformat()
                     }
                     
-                    self.redis_client.set(REDIS_KEYS['TOKEN'], json.dumps(token_info))
-                    self.redis_client.delete(REDIS_KEYS['AUTH_NEEDED'])
+                    self.redis_client.set(RedisKeys.TOKEN, json.dumps(token_info))
+                    self.redis_client.delete(RedisKeys.AUTH_NEEDED)
                     return token_data['access_token']
                     
         except Exception as e:
             logger.error(f"Error refreshing token: {str(e)}")
+            self.cleanup_token_data()
             return None
 
+    def cleanup_token_data(self):
+        """Clean up token data in Redis"""
+        self.redis_client.delete(RedisKeys.TOKEN)
+        self.redis_client.setex(RedisKeys.AUTH_NEEDED, 3600, '1')
 
 class LinkedInVerificationManager:
     """Handle LinkedIn verification process"""
-    def __init__(self, redis_client: redis.Redis, token_manager: TokenManager):
+    def __init__(self, redis_client: redis.Redis, token_manager: LinkedInTokenManager, config: LinkedInConfig):
         self.redis_client = redis_client
         self.token_manager = token_manager
+        self.config = config
 
     async def verify_linkedin_comment(self, user_id: str) -> Tuple[bool, str]:
         """Verify if a user has commented on the LinkedIn post with their verification code"""
         try:
-            stored_code = self.redis_client.get(REDIS_KEYS['VERIFICATION_CODE'].format(user_id))
+            stored_code = self.redis_client.get(RedisKeys.VERIFICATION_CODE.format(user_id))
             if not stored_code:
-                return False, "Code de vérification non trouvé. Veuillez recommencer."
+                return False, "Verification code not found. Please try again."
 
             stored_code = stored_code.decode('utf-8')
             
             access_token = await self.token_manager.get_valid_token()
             if not access_token:
-                if self.redis_client.get(REDIS_KEYS['AUTH_NEEDED']):
-                    return False, "Authentification LinkedIn requise. Un administrateur sera notifié."
-                return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+                if self.redis_client.get(RedisKeys.AUTH_NEEDED):
+                    return False, "LinkedIn authentication required. An administrator will be notified."
+                return False, "LinkedIn connection error. Please try again later."
 
             async with aiohttp.ClientSession() as session:
                 headers = {
@@ -213,46 +243,45 @@ class LinkedInVerificationManager:
 
                 try:
                     async with session.get(
-                        f"https://api.linkedin.com/v2/socialActions/{LINKEDIN_POST_ID}/comments",
+                        f"https://api.linkedin.com/v2/socialActions/{self.config.post_id}/comments",
                         headers=headers,
-                        timeout=API_TIMEOUT_SECONDS
+                        timeout=self.config.api_timeout_seconds
                     ) as response:
                         if response.status == 401:
-                            self.redis_client.delete(REDIS_KEYS['TOKEN'])
-                            return False, "Session LinkedIn expirée. Un administrateur sera notifié."
+                            self.redis_client.delete(RedisKeys.TOKEN)
+                            return False, "LinkedIn session expired. An administrator will be notified."
 
                         if response.status != 200:
-                            logger.error("LinkedIn API error", extra={
-                                'status_code': response.status,
-                                'user_id': user_id,
-                                'endpoint': 'comments'
-                            })
-                            return False, "Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
+                            raise LinkedInAPIError(
+                                response.status,
+                                "LinkedIn API error",
+                                LinkedInErrorCode.SERVER_ERROR
+                            )
 
                         data = await response.json()
                         return await self.process_comments(data, stored_code, user_id)
 
                 except asyncio.TimeoutError:
                     logger.error("LinkedIn API timeout")
-                    return False, "Délai d'attente dépassé. Veuillez réessayer plus tard."
+                    return False, "Request timed out. Please try again later."
 
                 except aiohttp.ClientError as e:
                     logger.error(f"Network error: {str(e)}")
-                    return False, "Erreur de connexion réseau. Veuillez réessayer plus tard."
+                    return False, "Network connection error. Please try again later."
 
         except Exception as e:
             logger.error(f"Error verifying LinkedIn comment: {str(e)}")
-            return False, "Erreur technique. Veuillez réessayer plus tard."
+            return False, "Technical error. Please try again later."
 
     async def process_comments(self, data: Dict[str, Any], stored_code: str, user_id: str) -> Tuple[bool, str]:
         """Process LinkedIn comments to find verification code"""
         comments = data.get('elements', [])
         if not comments:
-            return False, "Aucun commentaire trouvé. Assurez-vous d'avoir commenté avec le code fourni."
+            return False, "No comments found. Please make sure you commented with the provided code."
 
-        code_timestamp = self.redis_client.get(REDIS_KEYS['CODE_TIMESTAMP'].format(user_id))
+        code_timestamp = self.redis_client.get(RedisKeys.CODE_TIMESTAMP.format(user_id))
         if not code_timestamp:
-            return False, "Session expirée. Veuillez recommencer."
+            return False, "Session expired. Please start over."
 
         code_timestamp = float(code_timestamp.decode('utf-8'))
 
@@ -262,6 +291,6 @@ class LinkedInVerificationManager:
 
             if stored_code == comment_text and comment_time > code_timestamp:
                 logger.info(f"Valid comment found for user {user_id}")
-                return True, "Vérification réussie!"
+                return True, "Verification successful!"
 
-        return False, "Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir copié exactement le code fourni."
+        return False, "Verification code not found in comments. Please make sure you copied the code exactly."
