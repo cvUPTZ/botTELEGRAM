@@ -42,7 +42,7 @@ class LinkedInAPIError(LinkedInError):
         super().__init__(message)
 
 class LinkedInAuthManager:
-    """Handle LinkedIn authentication flow"""
+    """Handle LinkedIn authentication flow with improved error handling"""
     def __init__(self, redis_client: redis.Redis):
         self.redis_client = redis_client
 
@@ -57,7 +57,7 @@ class LinkedInAuthManager:
         query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
         return f"https://www.linkedin.com/oauth/v2/authorization?{query_string}"
 
-    async def initialize_token(self, code: str) -> bool:
+    async def initialize_token(self, code: str) -> Tuple[bool, str]:
         """Initialize token with authorization code"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -74,8 +74,13 @@ class LinkedInAuthManager:
                     data=data,
                     timeout=API_TIMEOUT_SECONDS
                 ) as response:
+                    if response.status == 401:
+                        logger.error("Invalid authorization code")
+                        return False, "Code d'autorisation invalide"
+                    
                     if response.status != 200:
-                        raise LinkedInAPIError(response.status, "Failed to initialize token")
+                        logger.error(f"LinkedIn API error: {response.status}")
+                        return False, "Erreur lors de l'authentification LinkedIn"
                     
                     token_data = await response.json()
                     expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
@@ -88,14 +93,16 @@ class LinkedInAuthManager:
                     
                     self.redis_client.set(REDIS_KEYS['TOKEN'], json.dumps(token_info))
                     self.redis_client.delete(REDIS_KEYS['AUTH_NEEDED'])
-                    return True
+                    
+                    logger.info("LinkedIn token initialized successfully")
+                    return True, "Authentification LinkedIn réussie"
                     
         except Exception as e:
             logger.error(f"Error initializing token: {str(e)}")
-            return False
+            return False, "Erreur technique lors de l'authentification"
 
 class TokenManager:
-    """Handle LinkedIn token management"""
+    """Handle LinkedIn token management with improved error handling"""
     def __init__(self, redis_client: redis.Redis):
         self.redis_client = redis_client
 
@@ -105,40 +112,41 @@ class TokenManager:
             token_data = self.redis_client.get(REDIS_KEYS['TOKEN'])
             
             if not token_data:
-                logger.info("No token found, initiating authentication flow")
-                return await self.handle_missing_token()
+                logger.info("No token found, setting auth needed flag")
+                self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+                return None
                 
-            token_data = json.loads(token_data)
-            expires_at = datetime.fromisoformat(token_data['expires_at'])
+            token_info = json.loads(token_data)
+            expires_at = datetime.fromisoformat(token_info['expires_at'])
             
+            # Check if token is about to expire
             if expires_at - timedelta(minutes=TOKEN_EXPIRY_BUFFER_MINUTES) > datetime.utcnow():
-                logger.info("Using existing valid token")
-                return token_data['access_token']
+                return token_info['access_token']
             
-            if 'refresh_token' in token_data:
+            # Try to refresh token
+            if 'refresh_token' in token_info:
                 logger.info("Token expired, attempting refresh")
-                new_token = await self.refresh_token(token_data['refresh_token'])
+                new_token = await self.refresh_token(token_info['refresh_token'])
                 if new_token:
                     return new_token
-                    
-            return await self.handle_missing_token()
             
-        except json.JSONDecodeError:
-            logger.error("Invalid token data in Redis")
+            # If refresh fails or no refresh token, set auth needed flag
+            logger.info("Token refresh failed, setting auth needed flag")
+            self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+            return None
+            
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Invalid token data in Redis: {str(e)}")
             self.redis_client.delete(REDIS_KEYS['TOKEN'])
-            return await self.handle_missing_token()
+            self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 3600, '1')
+            return None
             
         except Exception as e:
             logger.error(f"Error in get_valid_token: {str(e)}")
             return None
 
-    async def handle_missing_token(self) -> Optional[str]:
-        """Handle cases where no valid token exists"""
-        self.redis_client.setex(REDIS_KEYS['AUTH_NEEDED'], 300, '1')
-        return None
-
     async def refresh_token(self, refresh_token: str) -> Optional[str]:
-        """Refresh LinkedIn access token"""
+        """Refresh LinkedIn access token with improved error handling"""
         try:
             async with aiohttp.ClientSession() as session:
                 data = {
@@ -154,7 +162,8 @@ class TokenManager:
                     timeout=API_TIMEOUT_SECONDS
                 ) as response:
                     if response.status != 200:
-                        raise LinkedInAPIError(response.status, "Failed to refresh token")
+                        logger.error(f"Token refresh failed: {response.status}")
+                        return None
                     
                     token_data = await response.json()
                     expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
@@ -166,11 +175,13 @@ class TokenManager:
                     }
                     
                     self.redis_client.set(REDIS_KEYS['TOKEN'], json.dumps(token_info))
+                    self.redis_client.delete(REDIS_KEYS['AUTH_NEEDED'])
                     return token_data['access_token']
                     
         except Exception as e:
             logger.error(f"Error refreshing token: {str(e)}")
             return None
+
 
 class LinkedInVerificationManager:
     """Handle LinkedIn verification process"""
