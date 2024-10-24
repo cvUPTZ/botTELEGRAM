@@ -121,7 +121,7 @@ def create_application():
         application.add_handler(CommandHandler("start", user_handler.start))
         application.add_handler(CommandHandler("sendcv", user_handler.send_cv))
         application.add_handler(CommandHandler("myid", user_handler.my_id))
-        application.add_handler(CommandHandler("verify", user_handler.verify_linkedin))
+        # application.add_handler(CommandHandler("verify", user_handler.verify_linkedin))
         application.add_handler(CallbackQueryHandler(user_handler.callback_handler))
 
         # Add admin and message handlers
