@@ -301,11 +301,55 @@ class UserCommandHandler:
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
 
+    async def store_verification_data(
+        self,
+        user_id: int,
+        email: str,
+        cv_type: str,
+        verification_code: str
+    ) -> None:
+        """Store verification data in Redis"""
+        try:
+            current_timestamp = str(int(datetime.utcnow().timestamp()))
+            expiry_time = 3600  # 1 hour
+            
+            # Create pipeline
+            pipeline = self.redis_client.pipeline()
+            
+            # Add commands to pipeline
+            pipeline.setex(
+                RedisKeys.VERIFICATION_CODE.format(user_id),
+                expiry_time,
+                verification_code
+            )
+            pipeline.setex(
+                RedisKeys.CODE_TIMESTAMP.format(user_id),
+                expiry_time,
+                current_timestamp
+            )
+            pipeline.setex(
+                RedisKeys.EMAIL.format(user_id),
+                expiry_time,
+                email
+            )
+            pipeline.setex(
+                RedisKeys.CV_TYPE.format(user_id),
+                expiry_time,
+                cv_type
+            )
+            
+            # Execute pipeline
+            await pipeline.execute()
+            
+        except Exception as e:
+            logger.error(f"Error storing verification data: {str(e)}")
+            raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
+
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
         """Retrieve stored verification data from Redis"""
         try:
-            # Create pipeline for batch operations
-            pipeline = await self.redis_client.pipeline()
+            # Create pipeline
+            pipeline = self.redis_client.pipeline()
             
             # Add get operations to pipeline
             pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
@@ -327,7 +371,7 @@ class UserCommandHandler:
     async def cleanup_verification_data(self, user_id: int) -> None:
         """Clean up Redis verification data"""
         try:
-            pipeline = await self.redis_client.pipeline()
+            pipeline = self.redis_client.pipeline()
             keys = [
                 RedisKeys.VERIFICATION_CODE.format(user_id),
                 RedisKeys.CODE_TIMESTAMP.format(user_id),
@@ -338,44 +382,6 @@ class UserCommandHandler:
             await pipeline.execute()
         except Exception as e:
             logger.error(f"Error cleaning up verification data: {str(e)}")
-
-    async def store_verification_data(
-        self,
-        user_id: int,
-        email: str,
-        cv_type: str,
-        verification_code: str
-    ) -> None:
-        """Store verification data in Redis"""
-        try:
-            current_timestamp = str(int(datetime.utcnow().timestamp()))
-            expiry_time = 3600  # 1 hour
-            
-            pipeline = await self.redis_client.pipeline()
-            pipeline.setex(
-                RedisKeys.VERIFICATION_CODE.format(user_id),
-                expiry_time,
-                verification_code
-            )
-            pipeline.setex(
-                RedisKeys.CODE_TIMESTAMP.format(user_id),
-                expiry_time,
-                current_timestamp
-            )
-            pipeline.setex(
-                RedisKeys.EMAIL.format(user_id),
-                expiry_time,
-                email
-            )
-            pipeline.setex(
-                RedisKeys.CV_TYPE.format(user_id),
-                expiry_time,
-                cv_type
-            )
-            await pipeline.execute()
-        except Exception as e:
-            logger.error(f"Error storing verification data: {str(e)}")
-            raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
 
     @private_chat_only
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
