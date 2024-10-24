@@ -137,7 +137,10 @@ class UserCommandHandler:
         """Handle the /sendcv command"""
         try:
             user_id = update.effective_user.id
-            if not await self.check_rate_limit(user_id, 'sendcv'):
+            is_admin = user_id in self.ADMIN_IDS
+            
+            # Only check rate limit for non-admin users
+            if not is_admin and not await self.check_rate_limit(user_id, 'sendcv'):
                 await update.message.reply_text(
                     "⚠️ Vous avez atteint la limite de demandes de CV. "
                     "Veuillez réessayer dans 1 heure."
@@ -157,12 +160,24 @@ class UserCommandHandler:
             if cv_type not in ['junior', 'senior']:
                 raise CommandError('❌ Type de CV incorrect. Utilisez "junior" ou "senior".')
             
+            # For admin users, bypass verification and directly send the CV
+            if is_admin:
+                result = await send_email_with_cv(
+                    email,
+                    cv_type,
+                    user_id,
+                    self.supabase
+                )
+                await update.message.reply_text(result)
+                return
+                
+            # For non-admin users, continue with normal verification flow
             result = await self.handle_cv_request(update, context, user_id, email, cv_type)
             await update.message.reply_text(
                 result[1],
                 reply_markup=result[0] if result[0] else None
             )
-            
+                
         except CommandError as e:
             await update.message.reply_text(str(e))
         except TelegramError as e:
@@ -171,6 +186,8 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Error in send_cv command: {str(e)}")
             await self.handle_generic_error(update.message)
+
+    
 
     async def handle_cv_request(
         
