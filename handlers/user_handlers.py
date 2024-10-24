@@ -66,13 +66,14 @@ class UserCommandHandler:
         supabase_client: Client,
         linkedin_config: LinkedInConfig,
         linkedin_token_manager: LinkedInTokenManager,
-        linkedin_verification_manager: LinkedInVerificationManager
+        verification_manager: LinkedInVerificationManager  # Changed the parameter name for consistency
     ):
         self.redis_client = redis_client
         self.supabase = supabase_client
         self.linkedin_config = linkedin_config
         self.linkedin_token_manager = linkedin_token_manager
-        self.linkedin_verification_manager = linkedin_verification_manager
+        self.verification_manager = verification_manager  # Standardized the attribute name
+
 
     async def check_rate_limit(self, user_id: int, command: str) -> bool:
         """Check if user has exceeded rate limit for a command"""
