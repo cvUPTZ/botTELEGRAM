@@ -234,56 +234,56 @@ class LinkedInVerificationManager:
         except RedisError as e:
             logger.error(f"Error during cleanup: {str(e)}")
 
-    # Modified handle_linkedin_verification method for UserCommandHandler
-    async def handle_linkedin_verification(
-        self,
-        query: Update.callback_query,
-        user_id: int,
-        context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """Handle LinkedIn verification process with temp file."""
-        try:
-            verification_code = query.data.split("_")[1]
+    # # Modified handle_linkedin_verification method for UserCommandHandler
+    # async def handle_linkedin_verification(
+    #     self,
+    #     query: Update.callback_query,
+    #     user_id: int,
+    #     context: ContextTypes.DEFAULT_TYPE
+    # ) -> None:
+    #     """Handle LinkedIn verification process with temp file."""
+    #     try:
+    #         verification_code = query.data.split("_")[1]
             
-            # Store verification code in Redis
-            await self.redis_client.set(
-                f"linkedin_verification_code:{user_id}",
-                verification_code,
-                ex=3600  # 1 hour expiry
-            )
+    #         # Store verification code in Redis
+    #         await self.redis_client.set(
+    #             f"linkedin_verification_code:{user_id}",
+    #             verification_code,
+    #             ex=3600  # 1 hour expiry
+    #         )
             
-            await query.message.edit_text("🔄 Vérification du code en cours...")
+    #         await query.message.edit_text("🔄 Vérification du code en cours...")
             
-            # Verify code using temp file
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+    #         # Verify code using temp file
+    #         verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
             
-            if verified:
-                # Get email and CV type from Redis
-                stored_data = await self.get_stored_verification_data(user_id)
-                if not all(stored_data.values()):
-                    await query.message.edit_text(
-                        "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
-                    )
-                    return
+    #         if verified:
+    #             # Get email and CV type from Redis
+    #             stored_data = await self.get_stored_verification_data(user_id)
+    #             if not all(stored_data.values()):
+    #                 await query.message.edit_text(
+    #                     "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
+    #                 )
+    #                 return
                     
-                # Send CV
-                result = await send_email_with_cv(
-                    stored_data['email'],
-                    stored_data['cv_type'],
-                    user_id,
-                    self.supabase
-                )
+    #             # Send CV
+    #             result = await send_email_with_cv(
+    #                 stored_data['email'],
+    #                 stored_data['cv_type'],
+    #                 user_id,
+    #                 self.supabase
+    #             )
                 
-                await self.cleanup_verification_data(user_id)
-                await query.message.edit_text(result)
-            else:
-                await query.message.edit_text(message)
+    #             await self.cleanup_verification_data(user_id)
+    #             await query.message.edit_text(result)
+    #         else:
+    #             await query.message.edit_text(message)
                 
-        except Exception as e:
-            logger.error(f"Error in verification process: {str(e)}")
-            await query.message.edit_text(
-                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
-            )
+    #     except Exception as e:
+    #         logger.error(f"Error in verification process: {str(e)}")
+    #         await query.message.edit_text(
+    #             "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+    #         )
 
 
 
