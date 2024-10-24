@@ -181,18 +181,20 @@ class LinkedInVerificationManager:
         self.verification_code_prefix = "linkedin_verification_code:"
 
     async def _ensure_redis_connection(self) -> None:
-        """Ensure Redis connection is available."""
-        if not self.redis or isinstance(self.redis, bool):
-            logger.info("Redis client not initialized or invalid. Attempting to initialize.")
+        """Ensure Redis connection is available and properly initialized."""
+        if not hasattr(self, 'redis') or self.redis is None or isinstance(self.redis, bool):
             try:
-                # Replace with actual initialization logic for Redis connection
-                self.redis = await aioredis.create_redis_pool("redis://:AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA@devoted-filly-34475.upstash.io:6379")  # Example
+                self.redis = await aioredis.create_redis_pool(
+                    "redis://:AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA@devoted-filly-34475.upstash.io:6379"
+                )
             except RedisError as e:
                 logger.error(f"Failed to initialize Redis connection: {str(e)}")
                 raise LinkedInError("Redis client initialization failed", LinkedInErrorCode.REDIS_ERROR)
-    
+        
         try:
-            await self.redis.ping()
+            is_connected = await self.redis.ping()
+            if not is_connected:
+                raise LinkedInError("Redis ping failed", LinkedInErrorCode.REDIS_ERROR)
         except (RedisError, AttributeError) as e:
             logger.error(f"Redis connection error: {str(e)}")
             raise LinkedInError("Redis connection failed", LinkedInErrorCode.REDIS_ERROR)
@@ -280,6 +282,7 @@ class LinkedInVerificationManager:
     async def verify_linkedin_comment(self, user_id: int, max_retries: int = 3, retry_delay: float = 1.0) -> Tuple[bool, str]:
         """Verify user's LinkedIn comment with improved error handling and retries."""
         try:
+            # Ensure Redis connection is properly initialized
             await self._ensure_redis_connection()
             
             verification_code = await self._get_stored_code(user_id)
@@ -291,7 +294,6 @@ class LinkedInVerificationManager:
             for attempt in range(max_retries):
                 try:
                     found = await self._check_linkedin_comment(access_token, verification_code)
-                    
                     if found:
                         await self._cleanup_verification_data(user_id)
                         return True, "✅ Commentaire vérifié avec succès!"
@@ -311,13 +313,13 @@ class LinkedInVerificationManager:
                         access_token = await self.token_manager.refresh_token(user_id)
                         if not access_token:
                             return False, "❌ Erreur de rafraîchissement du token LinkedIn."
+                        continue
                     elif attempt == max_retries - 1:
                         raise
-        
+                        
         except LinkedInError as e:
             logger.error(f"LinkedIn error during verification: {str(e)}", exc_info=True)
             return False, self._get_user_friendly_error_message(e)
-        
         except Exception as e:
             logger.error(f"Unexpected error during verification: {str(e)}", exc_info=True)
             return False, "❌ Une erreur inattendue s'est produite. Veuillez réessayer."
