@@ -17,7 +17,7 @@ from telegram.error import TelegramError
 import redis
 from supabase import create_client, Client
 
-from .linkedin_api import (
+from .linkedin_utils import (
     LinkedInVerificationManager,
     LinkedInTokenManager,
     LinkedInConfig,
