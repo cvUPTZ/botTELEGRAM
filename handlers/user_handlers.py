@@ -164,6 +164,7 @@ class UserCommandHandler:
             await self.handle_generic_error(update.message)
 
     async def handle_cv_request(
+        
         self, 
         update: Update, 
         context: ContextTypes.DEFAULT_TYPE,
@@ -176,11 +177,11 @@ class UserCommandHandler:
             # Validate email format
             if not self.is_valid_email(email):
                 raise CommandError("❌ Format d'email invalide.")
-
-            # Check previous CV sends
-            if await self.check_previous_cv(email, cv_type):
+    
+            # Check previous CV sends (remove await if check_previous_cv is not async)
+            if self.check_previous_cv(email, cv_type):  # Removed 'await'
                 raise CommandError(f'📩 Vous avez déjà reçu un CV de type {cv_type}.')
-
+    
             # Generate and store verification data
             verification_code = self.generate_verification_code()
             await self.store_verification_data(user_id, email, cv_type, verification_code)
@@ -200,12 +201,13 @@ class UserCommandHandler:
             
             instructions = self.generate_instructions_message(verification_code)
             return reply_markup, instructions
-
+    
         except CommandError as e:
             raise
         except Exception as e:
             logger.error(f"Error in handle_cv_request: {str(e)}")
             raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
+
 
     async def handle_linkedin_verification(
         self,
