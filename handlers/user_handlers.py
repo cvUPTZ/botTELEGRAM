@@ -239,48 +239,65 @@ class UserCommandHandler:
     ) -> None:
         """Handle LinkedIn verification process with improved error handling"""
         try:
+            # Get verification code from callback data
+            verification_code = query.data.split("_")[1]
+    
+            # Get stored verification data
             stored_data = await self.get_stored_verification_data(user_id)
-            if not stored_data['code']:
+            
+            # Check if verification data exists
+            if not all(stored_data.values()):
                 await query.message.edit_text(
                     "❌ Session expirée. Veuillez recommencer avec /sendcv"
                 )
                 return
-            
-            verification_code = query.data.split("_")[1]
-            if verification_code != stored_data['code']:
-                await query.message.edit_text(
-                    "❌ Code de vérification invalide. Veuillez recommencer avec /sendcv"
-                )
-                return
-            
-            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
-            
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
-            if not verified:
-                await query.message.edit_text(message)
-                return
-            
-            result = await send_email_with_cv(
-                stored_data['email'],
-                stored_data['cv_type'],
-                user_id,
-                self.supabase
+    
+            # Store verification code in Redis for the verification manager
+            await self.redis_client.set(
+                f"linkedin_verification_code:{user_id}",
+                verification_code,
+                ex=3600  # 1 hour expiry
             )
-            
-            await self.cleanup_verification_data(user_id)
-            await query.message.edit_text(result)
-            
+    
+            await query.message.edit_text("🔄 Vérification du commentaire LinkedIn en cours...")
+    
+            # Verify the LinkedIn comment
+            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+    
+            if verified:
+                # Send CV if verification successful
+                result = await send_email_with_cv(
+                    stored_data['email'],
+                    stored_data['cv_type'],
+                    user_id,
+                    self.supabase
+                )
+                
+                # Clean up all verification data
+                await self.cleanup_verification_data(user_id)
+                
+                # Update message with result
+                await query.message.edit_text(result)
+            else:
+                await query.message.edit_text(message)
+    
+        except RedisError as e:
+            logger.error(f"Redis error in verification process: {str(e)}")
+            await query.message.edit_text(
+                "❌ Erreur de stockage temporaire. Veuillez réessayer avec /sendcv"
+            )
         except LinkedInError as e:
-            logger.error(f"LinkedIn error in verification: {str(e)}")
+            logger.error(f"LinkedIn error in verification process: {str(e)}")
             await query.message.edit_text(
                 "❌ Erreur de connexion à LinkedIn. Veuillez réessayer plus tard."
             )
+        except TelegramError as e:
+            logger.error(f"Telegram error in verification process: {str(e)}")
+            await self.handle_telegram_error(query.message, e)
         except Exception as e:
-            logger.error(f"Error in LinkedIn verification: {str(e)}")
-            await query.message.edit_text(
-                "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
-            )
-
+            logger.error(f"Unexpected error in verification process: {str(e)}")
+            await self.handle_generic_error(query.message)
+            
     async def store_verification_data(
         self,
         user_id: int,
