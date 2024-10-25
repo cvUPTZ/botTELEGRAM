@@ -159,12 +159,12 @@ async def main():
     await application.run_polling()
     await application.shutdown()
     
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"Bot encountered an error: {str(e)}")
-        exit(1)
+# if __name__ == "__main__":
+#     try:
+#         asyncio.run(main())
+#     except Exception as e:
+#         logger.error(f"Bot encountered an error: {str(e)}")
+#         exit(1)
 
 
 
