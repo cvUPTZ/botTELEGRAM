@@ -187,12 +187,12 @@ class LinkedInVerificationManager:
         try:
             # Ensure Redis connection is available
             if not self.redis:
-                return False, "❌ Erreur de connexion au stockage temporaire."
+                return (False, "❌ Erreur de connexion au stockage temporaire.")
 
             # Get verification code from Redis
             stored_code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
             if not stored_code:
-                return False, "❌ Code de vérification expiré ou introuvable."
+                return (False, "❌ Code de vérification expiré ou introuvable.")
             
             verification_code = stored_code.decode('utf-8')
             
@@ -211,13 +211,13 @@ class LinkedInVerificationManager:
                 if user_submitted_code == stored_code:
                     # Codes match, proceed with sending CV
                     await self._cleanup_verification_data(user_id)
-                    return True, "✅ Code vérifié avec succès! Envoi du CV en cours..."
+                    return (True, "✅ Code vérifié avec succès! Envoi du CV en cours...")
                 else:
-                    return False, "❌ Code de vérification incorrect."
+                    return (False, "❌ Code de vérification incorrect.")
                     
         except (RedisError, IOError) as e:
             logger.error(f"Error during verification: {str(e)}")
-            return False, "❌ Erreur lors de la vérification du code."
+            return (False, "❌ Erreur lors de la vérification du code.")
             
         finally:
             # Clean up temporary file
