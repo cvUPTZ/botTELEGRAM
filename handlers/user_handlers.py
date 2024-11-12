@@ -401,6 +401,7 @@ class UserCommandHandler:
     ) -> None:
         """Handle LinkedIn verification process with temp file."""
         try:
+            # Extract the verification code from the callback data
             verification_code = query.data.split("_")[1]
             
             # Store verification code in Redis
@@ -413,7 +414,7 @@ class UserCommandHandler:
             await query.message.edit_text("🔄 Vérification du code en cours...")
             
             # Verify code using temp file
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+            verified, message = await self.verification_manager.verify_linkedin_comment(user_id, verification_code)
             
             if verified:
                 # Get email and CV type from Redis
