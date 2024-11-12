@@ -11,7 +11,7 @@ USERS_TABLE = 'users'
 VERIFICATION_CODE_LENGTH = 6
 TOKEN_EXPIRY_BUFFER_MINUTES = 5
 API_TIMEOUT_SECONDS = 10
-LINKEDIN_POST_URL="https://www.linkedin.com/posts/cv-updz_%D9%85%D9%88%D8%AF%D8%A7%D9%84-cv-%D9%88%D8%A7%D8%AC%D8%AF-activity-7254038723820949505-Tj12/?originalSubdomain=ae"
+LINKEDIN_POST_URL="https://www.linkedin.com/posts/zakaria-houdache_%D8%A3%D9%82%D9%88%D9%84-%D9%81%D9%8A%D9%83-%D9%87%D8%B0%D9%87-%D8%A7%D9%84%D8%A7%D8%A8%D9%8A%D8%A7%D8%AA-%D9%81%D9%8A-%D8%A7%D9%84%D9%82%D9%85%D8%A9-%D8%A7%D9%84%D8%B9%D9%84%D9%8A%D8%A7-%D8%AA%D8%AC%D9%84%D9%89-activity-7253152926490144768-3t0V/?utm_source=share&utm_medium=member_desktop"
 LINKEDIN_CLIENT_ID = os.getenv('LINKEDIN_CLIENT_ID')
 LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET')
 LINKEDIN_REDIRECT_URI = 'https://bot-telegram-pied.vercel.app/linkedin-callback'
