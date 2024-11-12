@@ -404,10 +404,10 @@ class UserCommandHandler:
             verification_code = query.data.split("_")[1]
             
             # Store verification code in Redis
-            await self.redis_client.setex(
+            await self.redis_client.set(
                 f"linkedin_verification_code:{user_id}",
-                3600,  # 1 hour expiry
-                verification_code
+                verification_code,
+                ex=3600  # 1 hour expiry
             )
             
             await query.message.edit_text("🔄 Vérification du code en cours...")
@@ -436,7 +436,7 @@ class UserCommandHandler:
                 await query.message.edit_text(result)
             else:
                 await query.message.edit_text(message)
-                
+                    
         except Exception as e:
             logger.error(f"Error in verification process: {str(e)}")
             await query.message.edit_text(
