@@ -103,7 +103,7 @@ def create_application():
 
         # Create application with all clients
         application = CustomApplication.builder()\
-            .token(BOT_TOKEN)\
+            .token("7495077361:AAHgvegC8lWrL75Ykt8rwgzcsTqoptWJFd0")\
             .supabase_client(supabase)\
             .redis_client(redis_client)\
             .linkedin_config(linkedin_config)\
