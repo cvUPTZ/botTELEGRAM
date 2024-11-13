@@ -17,6 +17,8 @@ from telegram.error import TelegramError
 from redis.exceptions import RedisError
 
 import redis
+from redis import Redis
+
 from supabase import create_client, Client
 
 from utils.linkedin_utils import (
