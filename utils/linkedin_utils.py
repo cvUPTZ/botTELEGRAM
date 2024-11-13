@@ -1,5 +1,4 @@
 import logging
-# import aiohttp
 import asyncio
 import secrets
 import string
@@ -8,13 +7,8 @@ from typing import Optional, Tuple, Dict, Any
 from datetime import datetime, timedelta
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ConnectionError
-import aioredis
-from aioredis import Redis
 import httpx
 
-# import asyncio
-# from typing import Optional
-# from redis.exceptions import RedisError, ConnectionError
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -35,8 +29,6 @@ class LinkedInErrorCode:
     API_ERROR = "API_ERROR"
     REDIS_ERROR = "REDIS_ERROR"
 
-
-
 class RedisManager:
     def __init__(self, redis_url: str, max_retries: int = 3):
         self.redis_url = redis_url
@@ -48,13 +40,8 @@ class RedisManager:
         async with self._lock:
             if self._redis is None:
                 try:
-                    # Create a connection pool with aioredis
-                    self._redis = await aioredis.from_url(
-                        self.redis_url,
-                        decode_responses=True,
-                        retry_on_timeout=True,
-                        socket_keepalive=True,
-                    )
+                    # Create a connection pool with redis.asyncio
+                    self._redis = Redis.from_url(self.redis_url)
                     # Test the connection
                     await self._redis.ping()
                 except RedisError as e:
@@ -75,7 +62,6 @@ class RedisManager:
                     raise LinkedInError("Redis operation failed", LinkedInErrorCode.REDIS_ERROR)
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
                 self._redis = None  # Force reconnection
-
 
 class LinkedInConfig:
     def __init__(self, 
@@ -140,7 +126,6 @@ class LinkedInTokenManager:
             logger.error(f"Error storing token: {e}")
             raise
 
-
 class LinkedInAPI:
     def __init__(self, access_token: str):
         self.access_token = access_token
@@ -191,6 +176,7 @@ class LinkedInAPI:
                 await asyncio.sleep(2 ** attempt)
 
         return []
+
 
 
 class LinkedInVerificationManager:
