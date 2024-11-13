@@ -39,21 +39,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# # Initialize Redis client
-# redis_client = Redis(
-#     host='devoted-filly-34475.upstash.io',
-#     port=6379,
-#     password='AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA',  # if required
-#     decode_responses=True
-# )
-
-# Initialize LinkedIn components
-config = LinkedInConfig
-linkedin_api = LinkedInAPI(access_token='AQWgUSGuYXze9sqybjosgZxBGaVrljmRSyn81rRk9R1TOoWSwax9bl-NykX2505CYmn2CeS9YrIQK_OPBZnoCd1AOziCMQVtsOJmA-5UFP9aMx2uLF3loyctN9FKl915lfI4AAsvqLT0ypuI1C_K0ht8K5FXhJC5uYCg1ivNRWqPfaaeZtWZS2gw1P3w1qgroTNoxEbw4es093W1t2RzBTDU54V-_y99MBoR39sIiMgFdIWdzwYNd8IW3RPpIbb-IWRNF14bheCBV8S_5tr_EBoRsuAj2eVMlDW4SJ-9j92z-uQl5ks9vGUszG9H1PUmKbm390OphzweK78Sun4sOSmoqRYheQ')
-verification_manager = LinkedInVerificationManager(
-    redis_client=redis_client,
-    linkedin_api=linkedin_api
-)
 class CommandError(Exception):
     """Custom exception for command handling errors"""
     pass
@@ -95,7 +80,23 @@ class UserCommandHandler:
         self.supabase = supabase_client
         self.linkedin_config = linkedin_config
         self.linkedin_token_manager = linkedin_token_manager
-        self.verification_manager = linkedin_verification_manager 
+        self.verification_manager = linkedin_verification_manager
+
+        # Test Redis connection on initialization
+        try:
+            self.redis_client.ping()
+        except RedisError as e:
+            logger.error(f"Redis connection failed during initialization: {str(e)}")
+            # Continue initialization but log the error
+
+    async def test_redis_connection(self) -> bool:
+        """Test if Redis connection is working"""
+        try:
+            await self.redis_client.ping()
+            return True
+        except RedisError as e:
+            logger.error(f"Redis connection test failed: {str(e)}")
+            return False
 
     async def handle_telegram_error(self, message: Message, error: TelegramError):
         """Handle errors coming from Telegram API"""
@@ -110,6 +111,10 @@ class UserCommandHandler:
         """Check if user has exceeded rate limit for a command"""
         try:
             if user_id in self.ADMIN_IDS:
+                return True
+
+            if not await self.test_redis_connection():
+                logger.warning("Redis unavailable for rate limiting - allowing request")
                 return True
 
             key = RedisKeys.RATE_LIMIT.format(user_id, command)
@@ -130,9 +135,12 @@ class UserCommandHandler:
             await self.redis_client.incr(key)
             return True
             
+        except RedisError as e:
+            logger.error(f"Redis error checking rate limit: {str(e)}")
+            return True  # Fail open on Redis errors
         except Exception as e:
             logger.error(f"Error checking rate limit: {str(e)}")
-            return True  
+            return True  # Fail open on general errors
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,10 +174,9 @@ class UserCommandHandler:
             await self.handle_generic_error(update.message)
 
     def is_valid_email(self, email: str) -> bool:
-        """Simple email format validation"""
-        
-        regex = r'^\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        return re.match(regex, email) is not None
+        """Validate email format"""
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return bool(re.match(pattern, email))
 
     @private_chat_only
     async def send_cv(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -261,8 +268,9 @@ class UserCommandHandler:
             instructions = self.generate_instructions_message(verification_code)
             return reply_markup, instructions
         
-        except CommandError as e:
-            raise
+        except RedisError as e:
+            logger.error(f"Redis error in handle_cv_request: {str(e)}")
+            raise CommandError("⚠️ Service temporairement indisponible. Veuillez réessayer plus tard.")
         except Exception as e:
             logger.error(f"Error in handle_cv_request: {str(e)}")
             raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
@@ -276,9 +284,6 @@ class UserCommandHandler:
             )
         )
 
-    
-
-            
     async def store_verification_data(
         self,
         user_id: int,
@@ -286,8 +291,11 @@ class UserCommandHandler:
         cv_type: str,
         verification_code: str
     ) -> None:
-        """Store verification data in Redis"""
+        """Store verification data in Redis with improved error handling"""
         try:
+            if not await self.test_redis_connection():
+                raise RedisError("Redis connection unavailable")
+            
             current_timestamp = str(int(datetime.utcnow().timestamp()))
             expiry_time = 3600  # 1 hour
             
@@ -314,35 +322,48 @@ class UserCommandHandler:
                 cv_type
             )
             
-            pipeline.execute()
+            await pipeline.execute()
             
+        except RedisError as e:
+            logger.error(f"Redis error storing verification data: {str(e)}")
+            raise CommandError("⚠️ Service temporairement indisponible. Veuillez réessayer plus tard.")
         except Exception as e:
             logger.error(f"Error storing verification data: {str(e)}")
             raise CommandError("❌ Erreur lors du stockage des données. Veuillez réessayer.")
 
     async def get_stored_verification_data(self, user_id: int) -> Dict[str, Optional[str]]:
-        """Retrieve stored verification data from Redis"""
+        """Retrieve stored verification data from Redis with improved error handling"""
         try:
+            if not await self.test_redis_connection():
+                raise RedisError("Redis connection unavailable")
+
             pipeline = self.redis_client.pipeline()
     
             pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
             pipeline.get(RedisKeys.EMAIL.format(user_id))
             pipeline.get(RedisKeys.CV_TYPE.format(user_id))
             
-            values = pipeline.execute()
+            values = await pipeline.execute()
             
             return {
                 'code': values[0].decode('utf-8') if values[0] else None,
                 'email': values[1].decode('utf-8') if values[1] else None,
                 'cv_type': values[2].decode('utf-8') if values[2] else None
             }
+        except RedisError as e:
+            logger.error(f"Redis error retrieving verification data: {str(e)}")
+            return {'code': None, 'email': None, 'cv_type': None}
         except Exception as e:
             logger.error(f"Error retrieving verification data: {str(e)}")
             return {'code': None, 'email': None, 'cv_type': None}
 
     async def cleanup_verification_data(self, user_id: int) -> None:
-        """Clean up Redis verification data"""
+        """Clean up Redis verification data with improved error handling"""
         try:
+            if not await self.test_redis_connection():
+                logger.warning("Redis unavailable for cleanup - skipping")
+                return
+
             pipeline = self.redis_client.pipeline()
             keys = [
                 RedisKeys.VERIFICATION_CODE.format(user_id),
@@ -352,7 +373,9 @@ class UserCommandHandler:
             ]
             pipeline.delete(*keys)
             
-            pipeline.execute()
+            await pipeline.execute()
+        except RedisError as e:
+            logger.error(f"Redis error cleaning up verification data: {str(e)}")
         except Exception as e:
             logger.error(f"Error cleaning up verification data: {str(e)}")
 
@@ -382,7 +405,7 @@ class UserCommandHandler:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle callback queries with improved error handling"""
+        """Handle callback queries"""
         query = update.callback_query
         user_id = update.effective_user.id
         
@@ -411,7 +434,6 @@ class UserCommandHandler:
             logger.error(f"Error in callback handler: {str(e)}")
             await self.handle_generic_error(query.message)
 
-    
     async def handle_linkedin_verification(
         self,
         query: Update.callback_query,
@@ -420,98 +442,81 @@ class UserCommandHandler:
     ) -> None:
         """Handle LinkedIn verification process."""
         try:
-            # Initialize the components
-            linkedin_api = LinkedInAPI(access_token="AQWgUSGuYXze9sqybjosgZxBGaVrljmRSyn81rRk9R1TOoWSwax9bl-NykX2505CYmn2CeS9YrIQK_OPBZnoCd1AOziCMQVtsOJmA-5UFP9aMx2uLF3loyctN9FKl915lfI4AAsvqLT0ypuI1C_K0ht8K5FXhJC5uYCg1ivNRWqPfaaeZtWZS2gw1P3w1qgroTNoxEbw4es093W1t2RzBTDU54V-_y99MBoR39sIiMgFdIWdzwYNd8IW3RPpIbb-IWRNF14bheCBV8S_5tr_EBoRsuAj2eVMlDW4SJ-9j92z-uQl5ks9vGUszG9H1PUmKbm390OphzweK78Sun4sOSmoqRYheQ")
-            verification_manager = LinkedInVerificationManager(
-                redis_client=redis_client,
-                linkedin_api=linkedin_api,
-                verification_ttl=3600,  # 1 hour
-                max_verification_attempts=3
-            )
-            
-            # Generate a verification code
-            code = await verification_manager.generate_verification_code(user_id)
             await query.message.edit_text("🔄 Vérification du code en cours...")
 
-            # Verify a comment
-            success, message, data = await verification_manager.verify_linkedin_comment(
-                user_id=user_id,
-                verification_code=code,
-                post_id=post_id
-            )
-            # Extract the verification code from the callback data
-            # verification_code = query.data.split("_")[1]
-            # LinkedInAPI.get_post_comments           # Get stored verification data
-            # stored_data = await self.get_stored_verification_data(user_id)
-            # if not all(stored_data.values()):
-            #     await query.message.edit_text(
-            #         "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
-            #     )
-            #     return
+            # Get stored verification data
+            try:
+                stored_data = await self.get_stored_verification_data(user_id)
+                if not stored_data['code'] or not stored_data['email'] or not stored_data['cv_type']:
+                    await query.message.edit_text(
+                        "❌ Données de vérification expirées. Veuillez recommencer avec /sendcv"
+                    )
+                    return
+            except RedisError as e:
+                logger.error(f"Redis error getting verification data: {str(e)}")
+                await query.message.edit_text(
+                    "⚠️ Erreur de vérification. Veuillez réessayer avec /sendcv"
+                )
+                return
 
-            
-            # # Verify LinkedIn comment
-            # verified, message = await self.verification_manager.verify_linkedin_comment(
-            #     user_id,
-            #     verification_code
-            # )
-            
-            if success:
-                try:
-                    # Send CV
-                    result = await send_email_with_cv(
-                        stored_data['email'],
-                        stored_data['cv_type'],
-                        user_id,
-                        self.supabase
-                    )
-                    
-                    await self.cleanup_verification_data(user_id)
-                    await query.message.edit_text(
-                        "✅ Vérification réussie ! Votre CV a été envoyé."
-                    )
-                except Exception as e:
-                    logger.error(f"Error sending CV: {str(e)}")
-                    await query.message.edit_text(
-                        "❌ Erreur lors de l'envoi du CV. Veuillez réessayer."
-                    )
-            else:
-                await query.message.edit_text(message)
-                    
+            # Initialize LinkedIn verification
+            try:
+                linkedin_api = LinkedInAPI(access_token=self.linkedin_config.access_token)
+                verification_manager = LinkedInVerificationManager(
+                    redis_client=self.redis_client,
+                    linkedin_api=linkedin_api
+                )
+
+                # Verify LinkedIn comment
+                success, message = await verification_manager.verify_linkedin_comment(
+                    user_id=user_id,
+                    verification_code=stored_data['code'],
+                    post_url=self.linkedin_config.post_url
+                )
+
+                if success:
+                    try:
+                        # Send CV
+                        await send_email_with_cv(
+                            stored_data['email'],
+                            stored_data['cv_type'],
+                            user_id,
+                            self.supabase
+                        )
+                        
+                        await self.cleanup_verification_data(user_id)
+                        await query.message.edit_text(
+                            "✅ Vérification réussie ! Votre CV a été envoyé."
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending CV: {str(e)}")
+                        await query.message.edit_text(
+                            "❌ Erreur lors de l'envoi du CV. Veuillez réessayer."
+                        )
+                else:
+                    await query.message.edit_text(message)
+
+            except LinkedInError as e:
+                logger.error(f"LinkedIn API error: {str(e)}")
+                error_message = (
+                    "❌ Erreur de vérification LinkedIn. "
+                    "Assurez-vous d'avoir bien commenté avec le code correct."
+                )
+                if e.code == LinkedInErrorCode.RATE_LIMIT_EXCEEDED:
+                    error_message = "⚠️ Trop de tentatives. Veuillez réessayer dans quelques minutes."
+                await query.message.edit_text(error_message)
+                
+            except Exception as e:
+                logger.error(f"Error in LinkedIn verification: {str(e)}")
+                await query.message.edit_text(
+                    "❌ Erreur lors de la vérification. Veuillez réessayer."
+                )
+
         except Exception as e:
             logger.error(f"Error in verification process: {str(e)}")
             await query.message.edit_text(
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
-
-    async def handle_telegram_error(self, message: Message, error: TelegramError) -> None:
-        """Handle Telegram-specific errors"""
-        try:
-            if isinstance(error, TelegramError):
-                if "Message is not modified" in str(error):
-                    logger.warning("Attempted to edit message with same content")
-                    return
-                elif "Message to edit not found" in str(error):
-                    await message.reply_text(
-                        "❌ Message expiré. Veuillez réessayer la commande."
-                    )
-                else:
-                    await message.reply_text(
-                        "❌ Une erreur de communication s'est produite. "
-                        "Veuillez réessayer plus tard."
-                    )
-        except Exception as e:
-            logger.error(f"Error in handle_telegram_error: {str(e)}")
-
-    async def handle_generic_error(self, message: Message) -> None:
-        """Handle general errors with user-friendly messages"""
-        try:
-            await message.reply_text(
-                "❌ Une erreur inattendue s'est produite. "
-                "Veuillez réessayer plus tard."
-            )
-        except Exception as e:
-            logger.error(f"Error in handle_generic_error: {str(e)}")
 
     def generate_instructions_message(self, verification_code: str) -> str:
         """Generate instructions message for LinkedIn verification"""
@@ -523,13 +528,6 @@ class UserCommandHandler:
             f"⏳ Ce code est valable pendant 1 heure."
         )
 
-    @staticmethod
-    def is_valid_email(email: str) -> bool:
-        """Validate email format"""
-        import re
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        return bool(re.match(pattern, email))
-
     def setup_handlers(self, application: Application) -> None:
         """Register all command and callback handlers"""
         application.add_handler(CommandHandler("start", self.start))
@@ -537,135 +535,11 @@ class UserCommandHandler:
         application.add_handler(CommandHandler("myid", self.my_id))
         application.add_handler(CallbackQueryHandler(self.callback_handler))
 
-
-# # user_handlers.py
-# import logging
-# from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-# from telegram.ext import ContextTypes
-# from telegram.error import TelegramError
-# from functools import wraps
-# from linkedin_utils import LinkedInManager
-# import traceback
-
-# logger = logging.getLogger(__name__)
-
-# def error_handler(func):
-#     """Decorator for handling errors in telegram commands"""
-#     @wraps(func)
-#     async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-#         try:
-#             return await func(self, update, context, *args, **kwargs)
-#         except TelegramError as te:
-#             logger.error(f"Telegram Error in {func.__name__}: {str(te)}")
-#             await self._send_error_message(update, "Sorry, there was a Telegram error. Please try again later.")
-#         except Exception as e:
-#             logger.error(f"Error in {func.__name__}: {str(e)}\n{traceback.format_exc()}")
-#             await self._send_error_message(update, "An unexpected error occurred. Our team has been notified.")
-#     return wrapper
-
-# class UserHandler:
-#     def __init__(self, linkedin_manager: LinkedInManager):
-#         self.linkedin = linkedin_manager
-
-#     async def _send_error_message(self, update: Update, message: str):
-#         """Helper method to send error messages"""
-#         try:
-#             if update.callback_query:
-#                 await update.callback_query.message.edit_text(message)
-#             elif update.message:
-#                 await update.message.reply_text(message)
-#         except Exception as e:
-#             logger.error(f"Error sending error message: {str(e)}")
-
-#     @error_handler
-#     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-#         """Handle /start command"""
-#         user = update.effective_user
-#         logger.info(f"User {user.id} ({user.username}) started the bot")
-        
-#         welcome_msg = (
-#             "👋 *Welcome to the LinkedIn Verification Bot!*\n\n"
-#             "*Available Commands:*\n"
-#             "🔹 /verify - Start LinkedIn verification process\n"
-#             "🔹 /help - Show this message\n"
-#             "🔹 /status - Check verification status\n\n"
-#             "_To get started, use the /verify command._"
-#         )
-        
-#         await update.message.reply_text(welcome_msg, parse_mode='Markdown')
-
-#     @error_handler
-#     async def verify_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-#         """Handle /verify command"""
-#         user_id = update.effective_user.id
-#         logger.info(f"Verification requested by user {user_id}")
-
-#         can_retry, remaining = await self.linkedin.check_retry_limit(user_id)
-#         if not can_retry:
-#             await update.message.reply_text(
-#                 "⚠️ You've reached the maximum number of verification attempts.\n"
-#                 "Please try again in 24 hours or contact support."
-#             )
-#             return
-
-#         code = await self.linkedin.create_verification_request(user_id)
-#         if not code:
-#             await update.message.reply_text(
-#                 "❌ Error generating verification code. Please try again later."
-#             )
-#             return
-
-#         keyboard = [
-#             [InlineKeyboardButton("📝 View LinkedIn Post", url=self.linkedin.config.post_url)],
-#             [InlineKeyboardButton("✅ I've Commented", callback_data=f"verify_{code}")]
-#         ]
-
-#         instructions = (
-#             "*LinkedIn Verification Process*\n\n"
-#             f"1️⃣ Your verification code: `{code}`\n\n"
-#             "2️⃣ Please comment this code on the LinkedIn post\n"
-#             "3️⃣ Click 'I've Commented' once done\n\n"
-#             f"_Attempts remaining: {remaining}_"
-#         )
-
-#         await update.message.reply_text(
-#             instructions,
-#             reply_markup=InlineKeyboardMarkup(keyboard),
-#             parse_mode='Markdown'
-#         )
-
-#     @error_handler
-#     async def callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-#         """Handle callback queries"""
-#         query = update.callback_query
-#         await query.answer()
-
-#         if not query.data.startswith("verify_"):
-#             return
-
-#         user_id = update.effective_user.id
-#         code = query.data.split("_")[1]
-        
-#         logger.info(f"Verifying comment for user {user_id}")
-
-#         if await self.linkedin.verify_linkedin_comment(user_id, code):
-#             await query.message.edit_text(
-#                 "✅ *Verification Successful!*\n\n"
-#                 "Your LinkedIn comment has been verified.\n"
-#                 "You can now proceed with using the bot's features.",
-#                 parse_mode='Markdown'
-#             )
-#             logger.info(f"Verification successful for user {user_id}")
-#         else:
-#             _, remaining = await self.linkedin.check_retry_limit(user_id)
-#             await query.message.edit_text(
-#                 "❌ *Verification Failed*\n\n"
-#                 "Possible reasons:\n"
-#                 "• Comment not found\n"
-#                 "• Incorrect verification code\n"
-#                 "• Network issues\n\n"
-#                 f"Remaining attempts: {remaining}\n\n"
-#                 "Use /verify to try again.",
-#                 parse_mode='Markdown'
-#             )
-#             logger.warning(f"Verification failed for user {user_id}")
+    async def shutdown(self):
+        """Cleanup resources when shutting down"""
+        try:
+            # Close Redis connection
+            if self.redis_client:
+                await self.redis_client.close()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
