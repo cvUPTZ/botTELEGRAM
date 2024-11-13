@@ -1,5 +1,5 @@
+import httpx
 from flask import Flask, request, jsonify, redirect
-import aiohttp
 from telegram import Update
 from main import create_application
 from config import (
@@ -148,18 +148,18 @@ async def exchange_code_for_tokens(code: str) -> dict:
             'client_secret': LINKEDIN_CLIENT_SECRET
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(token_url, data=data) as response:
-                response_text = await response.text()
-                if response.status != 200:
-                    logger.error(f"Token exchange failed with status {response.status}: {response_text}")
-                    raise Exception(f"Token exchange failed: {response_text}")
-                
-                try:
-                    return await response.json()
-                except Exception as e:
-                    logger.error(f"Failed to parse token response: {response_text}")
-                    raise Exception(f"Invalid token response: {str(e)}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(token_url, data=data)
+            response_text = response.text
+            if response.status_code != 200:
+                logger.error(f"Token exchange failed with status {response.status_code}: {response_text}")
+                raise Exception(f"Token exchange failed: {response_text}")
+            
+            try:
+                return response.json()
+            except Exception as e:
+                logger.error(f"Failed to parse token response: {response_text}")
+                raise Exception(f"Invalid token response: {str(e)}")
                 
     except Exception as e:
         logger.error(f"Token exchange error: {str(e)}")
