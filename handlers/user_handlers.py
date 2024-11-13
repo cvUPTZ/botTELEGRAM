@@ -21,6 +21,7 @@ from supabase import create_client, Client
 
 from utils.linkedin_utils import (
     LinkedInVerificationManager,
+    LinkedInAPI,
     LinkedInTokenManager,
     LinkedInConfig,
     LinkedInError,
@@ -401,26 +402,43 @@ class UserCommandHandler:
     ) -> None:
         """Handle LinkedIn verification process."""
         try:
-            # Extract the verification code from the callback data
-            verification_code = query.data.split("_")[1]
-            
-            # Get stored verification data
-            stored_data = await self.get_stored_verification_data(user_id)
-            if not all(stored_data.values()):
-                await query.message.edit_text(
-                    "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
-                )
-                return
-
-            await query.message.edit_text("🔄 Vérification du code en cours...")
-            
-            # Verify LinkedIn comment
-            verified, message = await self.verification_manager.verify_linkedin_comment(
-                user_id,
-                verification_code
+            # Initialize the components
+            linkedin_api = LinkedInAPI(access_token="AQWgUSGuYXze9sqybjosgZxBGaVrljmRSyn81rRk9R1TOoWSwax9bl-NykX2505CYmn2CeS9YrIQK_OPBZnoCd1AOziCMQVtsOJmA-5UFP9aMx2uLF3loyctN9FKl915lfI4AAsvqLT0ypuI1C_K0ht8K5FXhJC5uYCg1ivNRWqPfaaeZtWZS2gw1P3w1qgroTNoxEbw4es093W1t2RzBTDU54V-_y99MBoR39sIiMgFdIWdzwYNd8IW3RPpIbb-IWRNF14bheCBV8S_5tr_EBoRsuAj2eVMlDW4SJ-9j92z-uQl5ks9vGUszG9H1PUmKbm390OphzweK78Sun4sOSmoqRYheQ")
+            verification_manager = LinkedInVerificationManager(
+                redis_client=redis_client,
+                linkedin_api=linkedin_api,
+                verification_ttl=3600,  # 1 hour
+                max_verification_attempts=3
             )
             
-            if verified:
+            # Generate a verification code
+            code = await verification_manager.generate_verification_code(user_id)
+            await query.message.edit_text("🔄 Vérification du code en cours...")
+
+            # Verify a comment
+            success, message, data = await verification_manager.verify_linkedin_comment(
+                user_id=user_id,
+                verification_code=code,
+                post_id=post_id
+            )
+            # Extract the verification code from the callback data
+            # verification_code = query.data.split("_")[1]
+            # LinkedInAPI.get_post_comments           # Get stored verification data
+            # stored_data = await self.get_stored_verification_data(user_id)
+            # if not all(stored_data.values()):
+            #     await query.message.edit_text(
+            #         "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
+            #     )
+            #     return
+
+            
+            # # Verify LinkedIn comment
+            # verified, message = await self.verification_manager.verify_linkedin_comment(
+            #     user_id,
+            #     verification_code
+            # )
+            
+            if success:
                 try:
                     # Send CV
                     result = await send_email_with_cv(
