@@ -193,13 +193,13 @@ class LinkedInVerificationManager:
         self.prefix = "linkedin_verification:"
         self._api = None
 
-    @property
-    async def api(self):
+     @property
+     async def api(self):
         if self._api is None:
             self._api = LinkedInAPI(self.config.access_token)
         return self._api
 
-    async def generate_verification_code(self, user_id: int) -> str:
+     async def generate_verification_code(self, user_id: int) -> str:
         try:
             while True:
                 code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
@@ -213,7 +213,7 @@ class LinkedInVerificationManager:
             logger.error(f"Error generating verification code: {e}")
             raise
 
-    async def verify_linkedin_comment(self, user_id: int, verification_code: str, post_id: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+     async def verify_linkedin_comment(self, user_id: int, verification_code: str, post_id: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         try:
             # Check verification attempts
             attempts_key = f"{self.prefix}attempts:{user_id}"
@@ -242,10 +242,10 @@ class LinkedInVerificationManager:
 
             return False, "❌ Code not found in recent comments. Please try again.", None
 
-        except LinkedInError as e:
+         except LinkedInError as e:
             logger.error(f"Verification error: {e}")
             return False, f"❌ Error: {e.message}", None
-        except Exception as e:
+         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             return False, "❌ An unexpected error occurred.", None
 
