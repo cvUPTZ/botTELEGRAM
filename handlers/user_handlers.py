@@ -49,7 +49,7 @@ redis_client = Redis(
 
 # Initialize LinkedIn components
 config = LinkedInConfig
-linkedin_api = LinkedInAPI(access_token=config.access_token)
+linkedin_api = LinkedInAPI(access_token='AQWgUSGuYXze9sqybjosgZxBGaVrljmRSyn81rRk9R1TOoWSwax9bl-NykX2505CYmn2CeS9YrIQK_OPBZnoCd1AOziCMQVtsOJmA-5UFP9aMx2uLF3loyctN9FKl915lfI4AAsvqLT0ypuI1C_K0ht8K5FXhJC5uYCg1ivNRWqPfaaeZtWZS2gw1P3w1qgroTNoxEbw4es093W1t2RzBTDU54V-_y99MBoR39sIiMgFdIWdzwYNd8IW3RPpIbb-IWRNF14bheCBV8S_5tr_EBoRsuAj2eVMlDW4SJ-9j92z-uQl5ks9vGUszG9H1PUmKbm390OphzweK78Sun4sOSmoqRYheQ')
 verification_manager = LinkedInVerificationManager(
     redis_client=redis_client,
     linkedin_api=linkedin_api
