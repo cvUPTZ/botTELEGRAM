@@ -24,6 +24,7 @@ from supabase import create_client, Client
 from utils.linkedin_utils import (
     LinkedInVerificationManager,
     LinkedInAPI,
+    RedisManager,
     LinkedInTokenManager,
     LinkedInConfig,
     LinkedInError,
@@ -446,8 +447,8 @@ class UserCommandHandler:
         """Handle LinkedIn verification process."""
         try:
             await query.message.edit_text("🔄 Vérification du code en cours...")
-
-            # Get stored verification data
+    
+            # Retrieve stored verification data
             try:
                 stored_data = await self.get_stored_verification_data(user_id)
                 if not stored_data['code'] or not stored_data['email'] or not stored_data['cv_type']:
@@ -456,70 +457,70 @@ class UserCommandHandler:
                     )
                     return
             except RedisError as e:
-                logger.error(f"Redis error getting verification data: {str(e)}")
+                logger.error(f"Redis error retrieving verification data: {e}")
                 await query.message.edit_text(
                     "⚠️ Erreur de vérification. Veuillez réessayer avec /sendcv"
                 )
                 return
-
-            # Initialize LinkedIn verification
+    
+            # Initialize LinkedIn verification manager
             try:
-                linkedin_api = LinkedInAPI(access_token=self.linkedin_config.access_token)
                 verification_manager = LinkedInVerificationManager(
-                    redis_client=self.redis_client,
-                    linkedin_api=linkedin_api
+                    redis_manager=self.redis_client,  # Pass the RedisManager instance
+                    config=self.linkedin_config
                 )
-
+    
                 # Verify LinkedIn comment
-                success, message = await verification_manager.verify_linkedin_comment(
+                success, message, comment_data = await verification_manager.verify_linkedin_comment(
                     user_id=user_id,
                     verification_code=stored_data['code'],
-                    post_url=self.linkedin_config.post_url
+                    post_id=self.linkedin_config.post_id  # Ensure post_id is correctly defined
                 )
-
+    
                 if success:
                     try:
-                        # Send CV
+                        # Send CV via email
                         await send_email_with_cv(
-                            stored_data['email'],
-                            stored_data['cv_type'],
-                            user_id,
-                            self.supabase
+                            email=stored_data['email'],
+                            cv_type=stored_data['cv_type'],
+                            user_id=user_id,
+                            supabase=self.supabase
                         )
-                        
+    
+                        # Cleanup verification data
                         await self.cleanup_verification_data(user_id)
-                        await query.message.edit_text(
-                            "✅ Vérification réussie ! Votre CV a été envoyé."
-                        )
+                        await query.message.edit_text("✅ Vérification réussie ! Votre CV a été envoyé.")
                     except Exception as e:
-                        logger.error(f"Error sending CV: {str(e)}")
+                        logger.error(f"Error while sending CV: {e}")
                         await query.message.edit_text(
                             "❌ Erreur lors de l'envoi du CV. Veuillez réessayer."
                         )
                 else:
+                    # Handle unsuccessful verification
                     await query.message.edit_text(message)
-
+    
             except LinkedInError as e:
-                logger.error(f"LinkedIn API error: {str(e)}")
-                error_message = (
-                    "❌ Erreur de vérification LinkedIn. "
-                    "Assurez-vous d'avoir bien commenté avec le code correct."
-                )
+                logger.error(f"LinkedIn API error: {e}")
+                error_message = "❌ Erreur de vérification LinkedIn. " \
+                                "Assurez-vous d'avoir bien commenté avec le code correct."
                 if e.code == LinkedInErrorCode.RATE_LIMIT_EXCEEDED:
-                    error_message = "⚠️ Trop de tentatives. Veuillez réessayer dans quelques minutes."
+                    error_message = (
+                        "⚠️ Trop de tentatives. Veuillez réessayer dans quelques minutes."
+                    )
                 await query.message.edit_text(error_message)
-                
+    
             except Exception as e:
-                logger.error(f"Error in LinkedIn verification: {str(e)}")
+                logger.error(f"Unexpected error during LinkedIn verification: {e}")
                 await query.message.edit_text(
-                    "❌ Erreur lors de la vérification. Veuillez réessayer."
+                    "❌ Erreur inattendue lors de la vérification. Veuillez réessayer."
                 )
-
+    
         except Exception as e:
-            logger.error(f"Error in verification process: {str(e)}")
+            logger.error(f"Error in verification process: {e}")
             await query.message.edit_text(
                 "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
             )
+
 
     def generate_instructions_message(self, verification_code: str) -> str:
         """Generate instructions message for LinkedIn verification"""
