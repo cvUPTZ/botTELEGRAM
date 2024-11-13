@@ -273,7 +273,7 @@ class LinkedInAuthManager:
             # Generate state parameter for CSRF protection
             state = secrets.token_urlsafe(32)
             
-            # Store state with user_id
+            # Store state with user_id in Redis
             await self.redis_manager.execute(
                 'setex',
                 f"{self.state_prefix}{state}",
@@ -281,7 +281,7 @@ class LinkedInAuthManager:
                 str(user_id)
             )
             
-            # Build authorization URL
+            # Build the LinkedIn authorization URL
             params = {
                 'response_type': 'code',
                 'client_id': self.config.client_id,
@@ -299,11 +299,12 @@ class LinkedInAuthManager:
 
     async def validate_state(self, state: str) -> Optional[int]:
         try:
+            # Retrieve the user_id from Redis based on the state
             user_id = await self.redis_manager.execute('get', f"{self.state_prefix}{state}")
             if not user_id:
                 return None
             
-            # Clean up used state
+            # Clean up the used state from Redis
             await self.redis_manager.execute('delete', f"{self.state_prefix}{state}")
             
             return int(user_id)
@@ -319,8 +320,8 @@ class LinkedInAuthManager:
             if not user_id:
                 return False, "❌ Invalid or expired session.", None
 
-            # Exchange code for tokens
-            async with aiohttp.ClientSession() as session:
+            # Exchange the authorization code for tokens using httpx
+            async with httpx.AsyncClient() as client:
                 data = {
                     'grant_type': 'authorization_code',
                     'code': code,
@@ -329,28 +330,33 @@ class LinkedInAuthManager:
                     'redirect_uri': self.config.redirect_uri
                 }
                 
-                async with session.post('https://www.linkedin.com/oauth/v2/accessToken', data=data) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"Token exchange failed: {error_text}")
-                        return False, "❌ LinkedIn authentication failed.", user_id
+                response = await client.post('https://www.linkedin.com/oauth/v2/accessToken', data=data)
+
+                if response.status_code != 200:
+                    error_text = response.text
+                    logger.error(f"Token exchange failed: {error_text}")
+                    return False, "❌ LinkedIn authentication failed.", user_id
                     
-                    result = await response.json()
-                    
-                    # Store tokens
-                    await self.token_manager.store_token(
-                        user_id=user_id,
-                        access_token=result['access_token'],
-                        expires_in=result['expires_in'],
-                        refresh_token=result.get('refresh_token')
-                    )
-                    
-                    return True, "✅ LinkedIn authentication successful!", user_id
-                    
+                # Parse the JSON response
+                result = response.json()
+
+                # Store the access token and other relevant info
+                await self.token_manager.store_token(
+                    user_id=user_id,
+                    access_token=result['access_token'],
+                    expires_in=result['expires_in'],
+                    refresh_token=result.get('refresh_token')
+                )
+                
+                return True, "✅ LinkedIn authentication successful!", user_id
+        
         except LinkedInError as e:
+            # Catch specific LinkedIn errors
             logger.error(f"LinkedIn error during OAuth callback: {str(e)}")
             return False, f"❌ Authentication error: {e.message}", None
+        
         except Exception as e:
+            # Catch any unexpected exceptions
             logger.error(f"Unexpected error during OAuth callback: {str(e)}")
             return False, "❌ An unexpected error occurred.", None
 
