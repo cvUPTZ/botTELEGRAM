@@ -186,7 +186,7 @@ class LinkedInAPI:
         return []
 
 class LinkedInVerificationManager:
-    def __init__(self, redis_manager: RedisManager, config: LinkedInConfig, verification_ttl: int = 3600):
+     def __init__(self, redis_manager: aioredis.Redis, config: LinkedInConfig, verification_ttl: int = 3600):
         self.redis_manager = redis_manager
         self.config = config
         self.verification_ttl = verification_ttl
@@ -205,14 +205,9 @@ class LinkedInVerificationManager:
                 code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
                 key = f"{self.prefix}code:{code}"
                 
-                exists = await self.redis_manager.execute('exists', key)
+                exists = await self.redis_manager.exists(key)
                 if not exists:
-                    await self.redis_manager.execute(
-                        'setex',
-                        key,
-                        self.verification_ttl,
-                        str(user_id)
-                    )
+                    await self.redis_manager.setex(key, self.verification_ttl, str(user_id))
                     return code
         except LinkedInError as e:
             logger.error(f"Error generating verification code: {e}")
@@ -222,17 +217,17 @@ class LinkedInVerificationManager:
         try:
             # Check verification attempts
             attempts_key = f"{self.prefix}attempts:{user_id}"
-            attempts = await self.redis_manager.execute('incr', attempts_key)
+            attempts = await self.redis_manager.incr(attempts_key)
             
             if attempts == 1:
-                await self.redis_manager.execute('expire', attempts_key, self.verification_ttl)
+                await self.redis_manager.expire(attempts_key, self.verification_ttl)
             
             if attempts > 3:  # Max 3 attempts
                 return False, "❌ Too many attempts. Please try again later.", None
 
             # Verify code
             code_key = f"{self.prefix}code:{verification_code}"
-            stored_user_id = await self.redis_manager.execute('get', code_key)
+            stored_user_id = await self.redis_manager.get(code_key)
             
             if not stored_user_id or int(stored_user_id) != user_id:
                 return False, "❌ Invalid or expired verification code.", None
