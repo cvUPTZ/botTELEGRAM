@@ -9,7 +9,6 @@ hypercorn==0.15.0
 supabase==1.0.3
 PyJWT
 redis
-distutils
 aiohttp
 aioredis
 
