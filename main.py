@@ -4,8 +4,8 @@ import asyncio
 from typing import Dict, Any, Optional
 
 from telegram import Update
-from telegram.ext import Application
-from supabase import create_client, Client
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from supabase import create_client
 import redis
 
 from handlers.user_handlers import UserCommandHandler
@@ -65,7 +65,6 @@ async def initialize() -> None:
     global application
     if application is None:
         application = await create_application()
-        await application.initialize()
         logger.info("Application initialized successfully")
 
 
