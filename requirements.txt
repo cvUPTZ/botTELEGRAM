@@ -12,3 +12,4 @@ redis==4.5.1
 aioredis==2.0.1
 setuptools==59.8.0
 httpx
+aiohttp
