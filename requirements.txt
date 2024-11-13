@@ -10,4 +10,5 @@ supabase==1.0.3
 PyJWT
 redis
 aiohttp
+aioredis
 
