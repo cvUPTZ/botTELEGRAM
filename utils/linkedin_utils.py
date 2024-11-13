@@ -2,21 +2,14 @@ import logging
 import aiohttp
 import asyncio
 import secrets
+import string
+import random
 from typing import Optional, Tuple, Dict, Any
-from redis import Redis
-
 from datetime import datetime, timedelta
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-import tempfile
-import os
-
-
-from urllib.parse import quote
-import requests
-
-# Configure logging
+# Keep existing logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -62,7 +55,7 @@ class LinkedInConfig:
 class LinkedInTokenManager:
     """Manage LinkedIn access tokens."""
     
-    def __init__(self, redis_client: Optional[Redis], config: LinkedInConfig):
+    def __init__(self, redis_client: Redis, config: LinkedInConfig):
         self.redis = redis_client
         self.config = config
         self.token_key_prefix = "linkedin_token:"
@@ -122,49 +115,6 @@ class LinkedInTokenManager:
             logger.error(f"Error storing token for user {user_id}: {str(e)}")
             raise LinkedInError("Failed to store token", LinkedInErrorCode.REDIS_ERROR)
 
-    async def refresh_token(self, user_id: int) -> Optional[str]:
-        """Refresh expired access token."""
-        try:
-            await self._ensure_redis_connection()
-            refresh_token = await self.get_refresh_token(user_id)
-            
-            if not refresh_token:
-                logger.error(f"No refresh token found for user {user_id}")
-                return None
-
-            async with aiohttp.ClientSession() as session:
-                data = {
-                    'grant_type': 'refresh_token',
-                    'client_id': self.config.client_id,
-                    'client_secret': self.config.client_secret,
-                    'refresh_token': refresh_token
-                }
-                
-                async with session.post('https://www.linkedin.com/oauth/v2/accessToken', data=data) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"Token refresh failed: {error_text}")
-                        raise LinkedInError("Failed to refresh token", LinkedInErrorCode.TOKEN_EXPIRED)
-                    
-                    result = await response.json()
-                    new_access_token = result.get('access_token')
-                    new_refresh_token = result.get('refresh_token')
-                    expires_in = result.get('expires_in', 3600)
-                    
-                    await self.store_token(
-                        user_id, 
-                        new_access_token, 
-                        expires_in,
-                        new_refresh_token
-                    )
-                    return new_access_token
-                    
-        except LinkedInError:
-            raise
-        except Exception as e:
-            logger.error(f"Error refreshing token for user {user_id}: {str(e)}")
-            return None
-
     async def get_refresh_token(self, user_id: int) -> Optional[str]:
         """Get refresh token for user."""
         try:
@@ -175,10 +125,8 @@ class LinkedInTokenManager:
             logger.error(f"Error getting refresh token for user {user_id}: {str(e)}")
             return None
 
-
-
 class LinkedInAPI:
-    """Enhanced LinkedIn API handler with improved error handling and rate limiting"""
+    """LinkedIn API handler with improved error handling and rate limiting"""
     def __init__(self, access_token: str, rate_limit_window: int = 3600):
         self.access_token = access_token
         self.base_url = "https://api.linkedin.com/v2"
@@ -189,6 +137,13 @@ class LinkedInAPI:
         }
         self.rate_limit_window = rate_limit_window
         self._session: Optional[aiohttp.ClientSession] = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session with connection pooling"""
@@ -235,7 +190,7 @@ class LinkedInAPI:
         return []
 
 class LinkedInVerificationManager:
-    """Enhanced verification manager with improved security and validation"""
+    """Verification manager with improved security and validation"""
     
     def __init__(
         self,
@@ -250,18 +205,34 @@ class LinkedInVerificationManager:
         self.max_attempts = max_verification_attempts
         self.prefix = "linkedin_verification:"
 
+    async def _ensure_redis_connection(self) -> None:
+        """Ensure Redis connection is available."""
+        if self.redis is None:
+            raise LinkedInError("Redis client not initialized", LinkedInErrorCode.REDIS_ERROR)
+        try:
+            await self.redis.ping()
+        except (RedisError, AttributeError) as e:
+            logger.error(f"Redis connection error: {str(e)}")
+            raise LinkedInError("Redis connection failed", LinkedInErrorCode.REDIS_ERROR)
+
     async def generate_verification_code(self, user_id: int) -> str:
         """Generate unique verification code with collision checking"""
-        while True:
-            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-            key = f"{self.prefix}code:{code}"
-            if not await self.redis.exists(key):
-                await self.redis.setex(
-                    key,
-                    self.verification_ttl,
-                    str(user_id)
-                )
-                return code
+        try:
+            await self._ensure_redis_connection()
+            while True:
+                code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+                key = f"{self.prefix}code:{code}"
+                exists = await self.redis.exists(key)
+                if not exists:
+                    await self.redis.setex(
+                        key,
+                        self.verification_ttl,
+                        str(user_id)
+                    )
+                    return code
+        except (LinkedInError, RedisError) as e:
+            logger.error(f"Error generating verification code: {str(e)}")
+            raise LinkedInError("Failed to generate verification code", LinkedInErrorCode.REDIS_ERROR)
 
     async def verify_linkedin_comment(
         self,
@@ -271,6 +242,8 @@ class LinkedInVerificationManager:
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """Enhanced verification with time window and attempt tracking"""
         try:
+            await self._ensure_redis_connection()
+            
             # Check verification attempts
             attempts_key = f"{self.prefix}attempts:{user_id}"
             attempts = await self.redis.incr(attempts_key)
@@ -298,29 +271,40 @@ class LinkedInVerificationManager:
 
             return False, "❌ Code non trouvé dans les commentaires récents. Veuillez réessayer.", None
 
+        except LinkedInError as e:
+            logger.error(f"LinkedIn error during verification for user {user_id}: {str(e)}")
+            return False, f"❌ Erreur LinkedIn: {e.message}", None
         except Exception as e:
             logger.error(f"Verification error for user {user_id}: {str(e)}")
             return False, "❌ Une erreur s'est produite lors de la vérification.", None
 
     async def store_verification_success(self, user_id: int, comment_data: dict) -> None:
         """Store successful verification data"""
-        success_key = f"{self.prefix}success:{user_id}"
-        await self.redis.hmset(success_key, {
-            'timestamp': datetime.utcnow().isoformat(),
-            'comment_actor': comment_data['actor'],
-            'comment_time': comment_data['created']
-        })
-        await self.redis.expire(success_key, 86400)  # Store for 24 hours
+        try:
+            await self._ensure_redis_connection()
+            success_key = f"{self.prefix}success:{user_id}"
+            await self.redis.hmset(success_key, {
+                'timestamp': datetime.utcnow().isoformat(),
+                'comment_actor': comment_data['actor'],
+                'comment_time': comment_data['created']
+            })
+            await self.redis.expire(success_key, 86400)  # Store for 24 hours
+        except (LinkedInError, RedisError) as e:
+            logger.error(f"Error storing verification success: {str(e)}")
+            raise LinkedInError("Failed to store verification success", LinkedInErrorCode.REDIS_ERROR)
 
     async def cleanup_verification_data(self, user_id: int, verification_code: str) -> None:
         """Clean up all verification-related data"""
-        keys = [
-            f"{self.prefix}code:{verification_code}",
-            f"{self.prefix}attempts:{user_id}"
-        ]
-        await self.redis.delete(*keys)
-
-
+        try:
+            await self._ensure_redis_connection()
+            keys = [
+                f"{self.prefix}code:{verification_code}",
+                f"{self.prefix}attempts:{user_id}"
+            ]
+            await self.redis.delete(*keys)
+        except (LinkedInError, RedisError) as e:
+            logger.error(f"Error cleaning up verification data: {str(e)}")
+            raise LinkedInError("Failed to cleanup verification data", LinkedInErrorCode.REDIS_ERROR)
 
 
 
