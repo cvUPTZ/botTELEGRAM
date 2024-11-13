@@ -254,23 +254,16 @@ class UserCommandHandler:
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
         """Handle CV request logic with improved error handling"""
         try:
-            verification_code = self.generate_verification_code()
-            await self.store_verification_data(user_id, email, cv_type, verification_code)
-            
-            keyboard = [
-                [InlineKeyboardButton(
-                    "📝 Voir la publication LinkedIn",
-                    url=self.linkedin_config.post_url
-                )],
-                [InlineKeyboardButton(
-                    "✅ J'ai commenté",
-                    callback_data=f"verify_{verification_code}"
-                )]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            instructions = self.generate_instructions_message(verification_code)
-            return reply_markup, instructions
+            await send_email_with_cv(
+                            email=stored_data['email'],
+                            cv_type=stored_data['cv_type'],
+                            user_id=user_id,
+                            supabase=self.supabase
+                        )
+    
+                        # Cleanup verification data
+            # await self.cleanup_verification_data(user_id)
+            await query.message.edit_text("✅ Vérification réussie ! Votre CV a été envoyé.")
         
         except RedisError as e:
             logger.error(f"Redis error in handle_cv_request: {str(e)}")
