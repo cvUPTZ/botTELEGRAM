@@ -39,13 +39,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Initialize Redis client
-redis_client = Redis(
-    host='devoted-filly-34475.upstash.io',
-    port=6379,
-    password='AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA',  # if required
-    decode_responses=True
-)
+# # Initialize Redis client
+# redis_client = Redis(
+#     host='devoted-filly-34475.upstash.io',
+#     port=6379,
+#     password='AYarAAIjcDFkOTIwODA5NTAwM2Y0MDY0YWY5OWZhMTk1Yjg5Y2Y0ZHAxMA',  # if required
+#     decode_responses=True
+# )
 
 # Initialize LinkedIn components
 config = LinkedInConfig
