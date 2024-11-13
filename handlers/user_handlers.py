@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Tuple, Optional, Dict
 from functools import wraps
 
-from telegram import Update, InlineKeyboardMarkup, Message
+from telegram import Update, InlineKeyboardMarkup, Message, CallbackQuery
 from telegram.ext import ContextTypes, CommandHandler, Application
 from telegram.error import TelegramError
 from redis.exceptions import RedisError
@@ -48,18 +48,22 @@ class UserCommandHandler:
     MAX_ATTEMPTS = 5
     RATE_LIMIT_WINDOW = 60 * 60  # 1 hour in seconds
 
-    def __init__(self, redis_client: redis.Redis, supabase_client: Client):
+    def __init__(self, supabase_client: Client, redis_client: Optional[redis.Redis] = None):
         self.redis_client = redis_client
         self.supabase = supabase_client
 
-        # Test Redis connection on initialization
-        try:
-            self.redis_client.ping()
-        except RedisError as e:
-            logger.error(f"Redis connection failed during initialization: {str(e)}")
+        # Test Redis connection if provided
+        if self.redis_client:
+            try:
+                self.redis_client.ping()
+            except RedisError as e:
+                logger.error(f"Redis connection failed during initialization: {str(e)}")
 
     async def test_redis_connection(self) -> bool:
         """Test if Redis connection is working"""
+        if not self.redis_client:
+            return False
+            
         try:
             self.redis_client.ping()
             return True
@@ -82,7 +86,7 @@ class UserCommandHandler:
             if user_id in self.ADMIN_IDS:
                 return True
 
-            if not await self.test_redis_connection():
+            if not self.redis_client or not await self.test_redis_connection():
                 logger.warning("Redis unavailable for rate limiting - allowing request")
                 return True
 
@@ -214,7 +218,8 @@ class UserCommandHandler:
     ) -> Tuple[Optional[InlineKeyboardMarkup], str]:
         """Handle CV request logic with improved error handling"""
         try:
-            # Sending email logic
+            # Here you would implement the actual CV sending logic
+            # For now, we'll just return a success message
             return None, "✅ Votre CV a été envoyé avec succès !"
 
         except RedisError as e:
@@ -223,3 +228,27 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Error in handle_cv_request: {str(e)}")
             raise CommandError("❌ Une erreur s'est produite. Veuillez réessayer plus tard.")
+
+    async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle the /myid command"""
+        try:
+            user_id = update.effective_user.id
+            await update.message.reply_text(f"Votre ID Telegram est : {user_id}")
+        except TelegramError as e:
+            logger.error(f"Telegram error in my_id command: {str(e)}")
+            await self.handle_telegram_error(update.message, e)
+        except Exception as e:
+            logger.error(f"Error in my_id command: {str(e)}")
+            await self.handle_generic_error(update.message)
+
+    async def callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle callback queries from inline keyboards"""
+        try:
+            query: CallbackQuery = update.callback_query
+            await query.answer()
+            # Add your callback handling logic here
+            
+        except TelegramError as e:
+            logger.error(f"Telegram error in callback handler: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error in callback handler: {str(e)}")
