@@ -399,42 +399,46 @@ class UserCommandHandler:
         user_id: int,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle LinkedIn verification process with temp file."""
+        """Handle LinkedIn verification process."""
         try:
             # Extract the verification code from the callback data
             verification_code = query.data.split("_")[1]
             
-            # Store verification code in Redis
-            await self.redis_client.set(
-                f"linkedin_verification_code:{user_id}",
-                verification_code,
-                ex=3600  # 1 hour expiry
-            )
-            
+            # Get stored verification data
+            stored_data = await self.get_stored_verification_data(user_id)
+            if not all(stored_data.values()):
+                await query.message.edit_text(
+                    "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
+                )
+                return
+
             await query.message.edit_text("🔄 Vérification du code en cours...")
             
-            # Verify code using temp file
-            verified, message = await self.verification_manager.verify_linkedin_comment(user_id, verification_code)
+            # Verify LinkedIn comment
+            verified, message = await self.verification_manager.verify_linkedin_comment(
+                user_id,
+                verification_code
+            )
             
             if verified:
-                # Get email and CV type from Redis
-                stored_data = await self.get_stored_verification_data(user_id)
-                if not all(stored_data.values()):
-                    await query.message.edit_text(
-                        "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
+                try:
+                    # Send CV
+                    result = await send_email_with_cv(
+                        stored_data['email'],
+                        stored_data['cv_type'],
+                        user_id,
+                        self.supabase
                     )
-                    return
                     
-                # Send CV
-                result = await send_email_with_cv(
-                    stored_data['email'],
-                    stored_data['cv_type'],
-                    user_id,
-                    self.supabase
-                )
-                
-                await self.cleanup_verification_data(user_id)
-                await query.message.edit_text(result)
+                    await self.cleanup_verification_data(user_id)
+                    await query.message.edit_text(
+                        "✅ Vérification réussie ! Votre CV a été envoyé."
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending CV: {str(e)}")
+                    await query.message.edit_text(
+                        "❌ Erreur lors de l'envoi du CV. Veuillez réessayer."
+                    )
             else:
                 await query.message.edit_text(message)
                     
