@@ -90,13 +90,13 @@ class UserCommandHandler:
             # Continue initialization but log the error
 
     async def test_redis_connection(self) -> bool:
-        """Test if Redis connection is working"""
-        try:
-            await self.redis_client.ping()
-            return True
-        except RedisError as e:
-            logger.error(f"Redis connection test failed: {str(e)}")
-            return False
+    """Test if Redis connection is working"""
+    try:
+        self.redis_client.ping()  # Remove await as Redis client is synchronous
+        return True
+    except RedisError as e:
+        logger.error(f"Redis connection test failed: {str(e)}")
+        return False
 
     async def handle_telegram_error(self, message: Message, error: TelegramError):
         """Handle errors coming from Telegram API"""
@@ -112,27 +112,27 @@ class UserCommandHandler:
         try:
             if user_id in self.ADMIN_IDS:
                 return True
-
+    
             if not await self.test_redis_connection():
                 logger.warning("Redis unavailable for rate limiting - allowing request")
                 return True
-
+    
             key = RedisKeys.RATE_LIMIT.format(user_id, command)
             
-            # Get current attempts
-            attempts = await self.redis_client.get(key)
+            # Get current attempts without await
+            attempts = self.redis_client.get(key)
             
             if attempts is None:
                 # First attempt
-                await self.redis_client.setex(key, self.RATE_LIMIT_WINDOW, 1)
+                self.redis_client.setex(key, self.RATE_LIMIT_WINDOW, 1)
                 return True
                 
             attempts = int(attempts)
             if attempts >= self.MAX_ATTEMPTS:
                 return False
                 
-            # Increment attempts
-            await self.redis_client.incr(key)
+            # Increment attempts without await
+            self.redis_client.incr(key)
             return True
             
         except RedisError as e:
@@ -141,6 +141,8 @@ class UserCommandHandler:
         except Exception as e:
             logger.error(f"Error checking rate limit: {str(e)}")
             return True  # Fail open on general errors
+
+
 
     @private_chat_only
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -295,10 +297,11 @@ class UserCommandHandler:
         try:
             if not await self.test_redis_connection():
                 raise RedisError("Redis connection unavailable")
-            
+                
             current_timestamp = str(int(datetime.utcnow().timestamp()))
             expiry_time = 3600  # 1 hour
             
+            # Use Redis pipeline without await
             pipeline = self.redis_client.pipeline()
             
             pipeline.setex(
@@ -322,7 +325,7 @@ class UserCommandHandler:
                 cv_type
             )
             
-            await pipeline.execute()
+            pipeline.execute()  # Remove await as Redis client is synchronous
             
         except RedisError as e:
             logger.error(f"Redis error storing verification data: {str(e)}")
@@ -336,14 +339,14 @@ class UserCommandHandler:
         try:
             if not await self.test_redis_connection():
                 raise RedisError("Redis connection unavailable")
-
+    
             pipeline = self.redis_client.pipeline()
     
             pipeline.get(RedisKeys.VERIFICATION_CODE.format(user_id))
             pipeline.get(RedisKeys.EMAIL.format(user_id))
             pipeline.get(RedisKeys.CV_TYPE.format(user_id))
             
-            values = await pipeline.execute()
+            values = pipeline.execute()  # Remove await as Redis client is synchronous
             
             return {
                 'code': values[0].decode('utf-8') if values[0] else None,
@@ -363,7 +366,7 @@ class UserCommandHandler:
             if not await self.test_redis_connection():
                 logger.warning("Redis unavailable for cleanup - skipping")
                 return
-
+    
             pipeline = self.redis_client.pipeline()
             keys = [
                 RedisKeys.VERIFICATION_CODE.format(user_id),
@@ -373,7 +376,7 @@ class UserCommandHandler:
             ]
             pipeline.delete(*keys)
             
-            await pipeline.execute()
+            pipeline.execute()  # Remove await as Redis client is synchronous
         except RedisError as e:
             logger.error(f"Redis error cleaning up verification data: {str(e)}")
         except Exception as e:
