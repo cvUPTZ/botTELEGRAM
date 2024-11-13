@@ -186,7 +186,7 @@ class LinkedInAPI:
         return []
 
 class LinkedInVerificationManager:
-    def __init__(self, redis_manager: aioredis.Redis, config: LinkedInConfig, verification_ttl: int = 3600):
+    def __init__(self, redis_manager: Redis, config: LinkedInConfig, verification_ttl: int = 3600):
         self.redis_manager = redis_manager
         self.config = config
         self.verification_ttl = verification_ttl
@@ -346,8 +346,9 @@ class LinkedInAuthManager:
             logger.error(f"Unexpected error during OAuth callback: {str(e)}")
             return False, "❌ An unexpected error occurred.", None
 
+# from redis.asyncio import Redis
+
 def create_linkedin_managers(redis_url: str, config: LinkedInConfig) -> Tuple[LinkedInTokenManager, LinkedInVerificationManager, LinkedInAuthManager]:
-    """Create and initialize all LinkedIn managers."""
     try:
         # Initialize Redis manager
         redis_manager = RedisManager(redis_url)
