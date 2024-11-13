@@ -22,7 +22,9 @@ LINKEDIN_ACCESS_TOKEN='AQWgUSGuYXze9sqybjosgZxBGaVrljmRSyn81rRk9R1TOoWSwax9bl-Ny
 LINKEDIN_SCOPE = 'email, openid, profile, r_organization_admin, r_organization_social, rw_organization_admin, w_member_social, w_organization_social'
 COMPANY_PAGE_ID = 105488010
 LINKEDIN_POST_ID = "7254038723820949505"
-
+MONGODB_URI="mongodb+srv://houdachezaki:ZgQQDpJCApo9p0Vf@cluster0.4lsrr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGODB_DATABASE="cvup"
+MONGODB_COLLECTION_PREFIX="_linkedin"
 # Redis Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_VERIFICATION_TTL = 3600  # 1 hour
