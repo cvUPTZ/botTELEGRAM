@@ -90,13 +90,13 @@ class UserCommandHandler:
             # Continue initialization but log the error
 
     async def test_redis_connection(self) -> bool:
-    """Test if Redis connection is working"""
-    try:
-        self.redis_client.ping()  # Remove await as Redis client is synchronous
-        return True
-    except RedisError as e:
-        logger.error(f"Redis connection test failed: {str(e)}")
-        return False
+        """Test if Redis connection is working"""
+        try:
+            self.redis_client.ping()  # Remove await as Redis client is synchronous
+            return True
+        except RedisError as e:
+            logger.error(f"Redis connection test failed: {str(e)}")
+            return False
 
     async def handle_telegram_error(self, message: Message, error: TelegramError):
         """Handle errors coming from Telegram API"""
