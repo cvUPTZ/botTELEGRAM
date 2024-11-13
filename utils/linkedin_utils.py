@@ -242,10 +242,10 @@ class LinkedInVerificationManager:
 
             return False, "❌ Code not found in recent comments. Please try again.", None
 
-         except LinkedInError as e:
+        except LinkedInError as e:
             logger.error(f"Verification error: {e}")
             return False, f"❌ Error: {e.message}", None
-         except Exception as e:
+        except Exception as e:
             logger.error(f"Unexpected error: {e}")
             return False, "❌ An unexpected error occurred.", None
 
