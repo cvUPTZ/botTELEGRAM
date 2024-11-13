@@ -178,8 +178,8 @@ class LinkedInTokenManager:
 
 
 class LinkedInAPI:
-    """Class to handle LinkedIn API interactions"""
-    def __init__(self, access_token: str):
+    """Enhanced LinkedIn API handler with improved error handling and rate limiting"""
+    def __init__(self, access_token: str, rate_limit_window: int = 3600):
         self.access_token = access_token
         self.base_url = "https://api.linkedin.com/v2"
         self.headers = {
@@ -187,91 +187,138 @@ class LinkedInAPI:
             'X-Restli-Protocol-Version': '2.0.0',
             'Content-Type': 'application/json'
         }
+        self.rate_limit_window = rate_limit_window
+        self._session: Optional[aiohttp.ClientSession] = None
 
-    async def get_post_comments(self, post_id: str) -> list:
-        """
-        Fetch comments on a LinkedIn post asynchronously.
-        
-        Args:
-            post_id (str): The URN of the LinkedIn post
-            
-        Returns:
-            list: List of comment texts or empty list if failed
-        """
-        try:
-            encoded_post_id = quote(post_id, safe='')
-            async with aiohttp.ClientSession() as session:
+    async def get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session with connection pooling"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                headers=self.headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+        return self._session
+
+    async def get_post_comments(self, post_id: str, max_retries: int = 3) -> list:
+        """Fetch comments with retry logic and improved error handling"""
+        for attempt in range(max_retries):
+            try:
+                session = await self.get_session()
+                encoded_post_id = quote(post_id, safe='')
                 async with session.get(
-                    f"{self.base_url}/socialActions/{encoded_post_id}/comments",
-                    headers=self.headers
+                    f"{self.base_url}/socialActions/{encoded_post_id}/comments"
                 ) as response:
-                    if response.status != 200:
-                        logger.error(f"Error fetching comments: {await response.text()}")
-                        return []
-                    
+                    if response.status == 429:  # Rate limit exceeded
+                        wait_time = int(response.headers.get('Retry-After', 60))
+                        logger.warning(f"Rate limit exceeded, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                        
+                    response.raise_for_status()
                     comments_data = await response.json()
-                    comments = comments_data.get('elements', [])
-                    return [comment.get('message', {}).get('text', '') 
-                           for comment in comments]
                     
-        except Exception as e:
-            logger.error(f"Error fetching comments: {str(e)}")
-            return []
+                    return [
+                        {
+                            'text': comment.get('message', {}).get('text', ''),
+                            'actor': comment.get('actor', ''),
+                            'created': comment.get('created', {}).get('time')
+                        }
+                        for comment in comments_data.get('elements', [])
+                    ]
+                    
+            except aiohttp.ClientError as e:
+                logger.error(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                
+        return []
 
 class LinkedInVerificationManager:
-    """Manage LinkedIn comment verification process using LinkedIn API."""
+    """Enhanced verification manager with improved security and validation"""
     
-    def __init__(self, 
-                 redis_client: Optional[Redis], 
-                 token_manager: 'LinkedInTokenManager', 
-                 config: 'LinkedInConfig', 
-                 verification_ttl: int = 3600):
+    def __init__(
+        self,
+        redis_client: Redis,
+        linkedin_api: LinkedInAPI,
+        verification_ttl: int = 3600,
+        max_verification_attempts: int = 3
+    ):
         self.redis = redis_client
-        self.token_manager = token_manager
-        self.config = config
+        self.linkedin_api = linkedin_api
         self.verification_ttl = verification_ttl
-        self.verification_code_prefix = "linkedin_verification_code:"
-        self.linkedin_api = LinkedInAPI(config.access_token)
+        self.max_attempts = max_verification_attempts
+        self.prefix = "linkedin_verification:"
 
-    async def verify_linkedin_comment(self, user_id: int, verification_code: str) -> Tuple[bool, str]:
-        """Verify user's LinkedIn comment using LinkedIn API."""
+    async def generate_verification_code(self, user_id: int) -> str:
+        """Generate unique verification code with collision checking"""
+        while True:
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            key = f"{self.prefix}code:{code}"
+            if not await self.redis.exists(key):
+                await self.redis.setex(
+                    key,
+                    self.verification_ttl,
+                    str(user_id)
+                )
+                return code
+
+    async def verify_linkedin_comment(
+        self,
+        user_id: int,
+        verification_code: str,
+        post_id: str
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Enhanced verification with time window and attempt tracking"""
         try:
-            # Get verification code from Redis
-            stored_code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
-            if not stored_code:
-                return False, "❌ Code de vérification expiré ou introuvable."
+            # Check verification attempts
+            attempts_key = f"{self.prefix}attempts:{user_id}"
+            attempts = await self.redis.incr(attempts_key)
+            if attempts == 1:
+                await self.redis.expire(attempts_key, self.verification_ttl)
             
-            stored_code = stored_code.decode('utf-8')
+            if attempts > self.max_attempts:
+                return False, "❌ Trop de tentatives. Veuillez réessayer plus tard.", None
+
+            # Get stored verification data
+            code_key = f"{self.prefix}code:{verification_code}"
+            stored_user_id = await self.redis.get(code_key)
             
-            # Fetch comments from LinkedIn API
-            comments = await self.linkedin_api.get_post_comments(self.config.post_id)
+            if not stored_user_id or int(stored_user_id) != user_id:
+                return False, "❌ Code de vérification invalide ou expiré.", None
+
+            # Fetch and verify comments
+            comments = await self.linkedin_api.get_post_comments(post_id)
             
-            # Check if verification code exists in any comment
-            code_found = False
             for comment in comments:
-                if stored_code in comment:
-                    code_found = True
-                    break
-            
-            if code_found:
-                await self._cleanup_verification_data(user_id)
-                return True, "✅ Code vérifié avec succès! Envoi du CV en cours..."
-            else:
-                return False, "❌ Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir commenté avec le bon code."
-                    
-        except RedisError as e:
-            logger.error(f"Redis error during verification: {str(e)}")
-            return False, "❌ Erreur lors de la vérification du code."
-        except Exception as e:
-            logger.error(f"Error during verification: {str(e)}")
-            return False, "❌ Une erreur s'est produite lors de la vérification."
+                if verification_code in comment['text']:
+                    # Store verification success
+                    await self.store_verification_success(user_id, comment)
+                    return True, "✅ Vérification réussie!", comment
 
-    async def _cleanup_verification_data(self, user_id: int) -> None:
-        """Clean up verification data from Redis."""
-        try:
-            await self.redis.delete(f"{self.verification_code_prefix}{user_id}")
-        except RedisError as e:
-            logger.error(f"Error during cleanup: {str(e)}")
+            return False, "❌ Code non trouvé dans les commentaires récents. Veuillez réessayer.", None
+
+        except Exception as e:
+            logger.error(f"Verification error for user {user_id}: {str(e)}")
+            return False, "❌ Une erreur s'est produite lors de la vérification.", None
+
+    async def store_verification_success(self, user_id: int, comment_data: dict) -> None:
+        """Store successful verification data"""
+        success_key = f"{self.prefix}success:{user_id}"
+        await self.redis.hmset(success_key, {
+            'timestamp': datetime.utcnow().isoformat(),
+            'comment_actor': comment_data['actor'],
+            'comment_time': comment_data['created']
+        })
+        await self.redis.expire(success_key, 86400)  # Store for 24 hours
+
+    async def cleanup_verification_data(self, user_id: int, verification_code: str) -> None:
+        """Clean up all verification-related data"""
+        keys = [
+            f"{self.prefix}code:{verification_code}",
+            f"{self.prefix}attempts:{user_id}"
+        ]
+        await self.redis.delete(*keys)
 
 
 
