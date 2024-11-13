@@ -300,13 +300,13 @@ class UserCommandHandler:
         try:
             if not await self.test_redis_connection():
                 raise RedisError("Redis connection unavailable")
-    
+            
             current_timestamp = str(int(datetime.utcnow().timestamp()))
             expiry_time = 3600  # 1 hour
-    
+            
             # Use Redis pipeline
             pipeline = self.redis_client.pipeline()
-    
+            
             pipeline.setex(
                 RedisKeys.VERIFICATION_CODE.format(user_id),
                 expiry_time,
@@ -327,9 +327,9 @@ class UserCommandHandler:
                 expiry_time,
                 cv_type
             )
-    
+            
             await pipeline.execute()
-    
+        
         except RedisError as e:
             logger.error(f"Redis error storing verification data: {str(e)}")
             raise CommandError("⚠️ Service temporairement indisponible. Veuillez réessayer plus tard.")
