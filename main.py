@@ -11,22 +11,26 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters
 )
+import redis
+from supabase import create_client, Client
+
 from handlers.admin_handlers import tag_all, offremploi
 from handlers.user_handlers import UserCommandHandler
 from handlers.message_handlers import welcome_new_member, handle_message
 from config import (
     BOT_TOKEN,
     SUPABASE_URL,
-    SUPABASE_KEY
+    SUPABASE_KEY,
+    REDIS_URL  # Add this to your config
 )
-from supabase import create_client, Client
 
-# Configure logging with detailed format
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
 
 class BotApplication(Application):
     """Enhanced Application class with integrated service clients."""
@@ -34,6 +38,7 @@ class BotApplication(Application):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.supabase: Optional[Client] = None
+        self.redis: Optional[redis.Redis] = None
         self.start_time: datetime = datetime.now()
 
     @classmethod
@@ -45,6 +50,9 @@ class BotApplication(Application):
         logger.info("Initiating graceful shutdown...")
         
         try:
+            if self.redis:
+                self.redis.close()
+            
             # Call parent shutdown
             await super().shutdown()
             logger.info("Application shutdown complete")
@@ -53,6 +61,7 @@ class BotApplication(Application):
             logger.error(f"Error during shutdown: {str(e)}")
             raise
 
+
 class BotApplicationBuilder(Application.builder().__class__):
     """Enhanced application builder with additional configuration options."""
     
@@ -60,17 +69,25 @@ class BotApplicationBuilder(Application.builder().__class__):
         super().__init__()
         self._application_class = BotApplication
         self._supabase: Optional[Client] = None
+        self._redis: Optional[redis.Redis] = None
 
     def with_supabase(self, client: Client):
         """Configure Supabase client."""
         self._supabase = client
         return self
 
+    def with_redis(self, client: redis.Redis):
+        """Configure Redis client."""
+        self._redis = client
+        return self
+
     def build(self) -> BotApplication:
         """Build the application with all configured components."""
         app = super().build()
         app.supabase = self._supabase
+        app.redis = self._redis
         return app
+
 
 async def initialize_application() -> BotApplication:
     """Initialize and configure the bot application with all required components."""
@@ -78,15 +95,20 @@ async def initialize_application() -> BotApplication:
         # Initialize Supabase client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+        # Initialize Redis client
+        redis_client = redis.from_url(REDIS_URL) if REDIS_URL else None
+
         # Build application with components
         application = BotApplication.builder()\
             .token(BOT_TOKEN)\
             .with_supabase(supabase)\
+            .with_redis(redis_client)\
             .build()
 
         # Initialize handlers
         user_handler = UserCommandHandler(
-            supabase_client=supabase
+            supabase_client=supabase,
+            redis_client=redis_client
         )
 
         # Register command handlers
@@ -115,6 +137,7 @@ async def initialize_application() -> BotApplication:
         logger.error(f"Failed to initialize application: {str(e)}")
         raise
 
+
 async def main():
     """Main entry point for the bot application."""
     try:
@@ -134,6 +157,8 @@ async def main():
             )
 
         # Start the application
+        # await application.initialize()
+        # Start the application
         await application.initialize()
         await application.start()
         logger.info("Bot started successfully")
@@ -148,7 +173,8 @@ async def main():
         raise
     finally:
         # Ensure proper shutdown
-        await application.shutdown()
+        if 'application' in locals():
+            await application.shutdown()
         logger.info("Application shutdown complete")
 
 if __name__ == "__main__":
