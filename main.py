@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+import tracemalloc
 from typing import Dict, Any, Optional
 
 from telegram import Update
@@ -64,8 +65,12 @@ async def initialize() -> None:
     """Initialize the application if not already initialized."""
     global application
     if application is None:
-        application = await create_application()
-        logger.info("Application initialized successfully")
+        try:
+            application = await create_application()
+            logger.info("Application initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize application: {str(e)}")
+            raise
 
 
 async def process_update(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,14 +106,17 @@ async def process_update(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """AWS Lambda handler function."""
+    tracemalloc.start()
     try:
         logger.info(f"Received event: {json.dumps(event)}")
         
+        # Create new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         # Process update asynchronously
-        return asyncio.get_event_loop().run_until_complete(
-            process_update(event)
-        )
-
+        return loop.run_until_complete(process_update(event))
+    
     except Exception as e:
         logger.error(f"Lambda handler error: {str(e)}")
         return {
@@ -118,6 +126,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "message": "Internal server error"
             })
         }
+    finally:
+        # Clean up the loop
+        loop.close()
 
 
 # For local development
