@@ -297,47 +297,39 @@ class UserCommandHandler:
     
     # Example Redis access method with timeout handling
     async def store_verification_data(self, user_id: int, email: str, cv_type: str, verification_code: str) -> None:
-        """Store verification data in Redis with improved error handling"""
         try:
             if not await self.test_redis_connection():
                 raise RedisError("Redis connection unavailable")
-                
+    
             current_timestamp = str(int(datetime.utcnow().timestamp()))
             expiry_time = 3600  # 1 hour
-            
-            # Use Redis pipeline with timeout
+    
+            # Use Redis pipeline
             pipeline = self.redis_client.pipeline()
-            
+    
             pipeline.setex(
                 RedisKeys.VERIFICATION_CODE.format(user_id),
                 expiry_time,
-                verification_code,
-                timeout=5  # Timeout in seconds for Redis command
+                verification_code
             )
             pipeline.setex(
                 RedisKeys.CODE_TIMESTAMP.format(user_id),
                 expiry_time,
-                current_timestamp,
-                timeout=5
+                current_timestamp
             )
             pipeline.setex(
                 RedisKeys.EMAIL.format(user_id),
                 expiry_time,
-                email,
-                timeout=5
+                email
             )
             pipeline.setex(
                 RedisKeys.CV_TYPE.format(user_id),
                 expiry_time,
-                cv_type,
-                timeout=5
+                cv_type
             )
-            
-            pipeline.execute()
-            
-        except TimeoutError as e:
-            logger.error(f"TimeoutError storing verification data: {str(e)}")
-            await self.handle_redis_timeout_error(update, e)
+    
+            await pipeline.execute()
+    
         except RedisError as e:
             logger.error(f"Redis error storing verification data: {str(e)}")
             raise CommandError("⚠️ Service temporairement indisponible. Veuillez réessayer plus tard.")
