@@ -8,6 +8,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 import tempfile
 import os
+
+
+from urllib.parse import quote
+import requests
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -167,22 +172,7 @@ class LinkedInTokenManager:
             logger.error(f"Error getting refresh token for user {user_id}: {str(e)}")
             return None
 
-import logging
-import aiohttp
-import asyncio
-from typing import Optional, Tuple, Dict, Any
-from datetime import datetime, timedelta
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
-from urllib.parse import quote
-import requests
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 class LinkedInAPI:
     """Class to handle LinkedIn API interactions"""
@@ -246,7 +236,7 @@ class LinkedInVerificationManager:
             # Get verification code from Redis
             stored_code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
             if not stored_code:
-                return (False, "❌ Code de vérification expiré ou introuvable.")
+                return False, "❌ Code de vérification expiré ou introuvable."
             
             stored_code = stored_code.decode('utf-8')
             
@@ -254,18 +244,24 @@ class LinkedInVerificationManager:
             comments = await self.linkedin_api.get_post_comments(self.config.post_id)
             
             # Check if verification code exists in any comment
-            if any(stored_code in comment for comment in comments):
+            code_found = False
+            for comment in comments:
+                if stored_code in comment:
+                    code_found = True
+                    break
+            
+            if code_found:
                 await self._cleanup_verification_data(user_id)
-                return (True, "✅ Code vérifié avec succès! Envoi du CV en cours...")
+                return True, "✅ Code vérifié avec succès! Envoi du CV en cours..."
             else:
-                return (False, "❌ Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir commenté avec le bon code.")
+                return False, "❌ Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir commenté avec le bon code."
                     
         except RedisError as e:
             logger.error(f"Redis error during verification: {str(e)}")
-            return (False, "❌ Erreur lors de la vérification du code.")
+            return False, "❌ Erreur lors de la vérification du code."
         except Exception as e:
             logger.error(f"Error during verification: {str(e)}")
-            return (False, "❌ Une erreur s'est produite lors de la vérification.")
+            return False, "❌ Une erreur s'est produite lors de la vérification."
 
     async def _cleanup_verification_data(self, user_id: int) -> None:
         """Clean up verification data from Redis."""
