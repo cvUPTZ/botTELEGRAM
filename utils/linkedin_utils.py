@@ -8,7 +8,11 @@ from typing import Optional, Tuple, Dict, Any
 from datetime import datetime, timedelta
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ConnectionError
-
+import aioredis
+from aioredis import Redis
+# import asyncio
+# from typing import Optional
+# from redis.exceptions import RedisError, ConnectionError
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -29,6 +33,8 @@ class LinkedInErrorCode:
     API_ERROR = "API_ERROR"
     REDIS_ERROR = "REDIS_ERROR"
 
+
+
 class RedisManager:
     def __init__(self, redis_url: str, max_retries: int = 3):
         self.redis_url = redis_url
@@ -40,12 +46,14 @@ class RedisManager:
         async with self._lock:
             if self._redis is None:
                 try:
-                    self._redis = Redis.from_url(
+                    # Create a connection pool with aioredis
+                    self._redis = await aioredis.from_url(
                         self.redis_url,
                         decode_responses=True,
                         retry_on_timeout=True,
-                        socket_keepalive=True
+                        socket_keepalive=True,
                     )
+                    # Test the connection
                     await self._redis.ping()
                 except RedisError as e:
                     logger.error(f"Failed to connect to Redis: {e}")
@@ -56,13 +64,16 @@ class RedisManager:
         for attempt in range(self.max_retries):
             try:
                 redis = await self.get_connection()
-                return await getattr(redis, operation)(*args, **kwargs)
+                # Dynamically execute the requested Redis operation
+                method = getattr(redis, operation)
+                return await method(*args, **kwargs)
             except (ConnectionError, RedisError) as e:
                 if attempt == self.max_retries - 1:
                     logger.error(f"Redis operation failed after {self.max_retries} attempts: {e}")
                     raise LinkedInError("Redis operation failed", LinkedInErrorCode.REDIS_ERROR)
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
                 self._redis = None  # Force reconnection
+
 
 class LinkedInConfig:
     def __init__(self, 
