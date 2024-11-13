@@ -1,0 +1,37 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "Cython>=0.29.32"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-app"
+version = "0.1.0"
+description = "My awesome application"
+authors = [
+    { name = "John Doe", email = "john.doe@example.com" }
+]
+dependencies = [
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "Flask[async]>=3.0.0",
+    "python-telegram-bot[webhooks]>=20.0",
+    "dash>=2.9.3",
+    "Werkzeug>=3.0.0",
+    "quart>=0.19.4",
+    "hypercorn>=0.15.0",
+    "supabase>=1.0.3",
+    "PyJWT>=2.6.0",
+    "redis>=4.5.1",
+    "aioredis>=2.0.1",
+    "aiohttp>=3.8.3",
+    "setuptools>=59.8.0"
+]
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+[project.urls]
+Homepage = "https://github.com/cvUPTZ/botTELEGRAM"
+Bug Tracker = "https://github.com/cvUPTZ/botTELEGRAM/issues"
