@@ -1,238 +1,161 @@
 import asyncio
 import logging
 import signal
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from datetime import datetime
+from typing import Optional
+
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters
+)
 from handlers.admin_handlers import tag_all, offremploi
 from handlers.user_handlers import UserCommandHandler
 from handlers.message_handlers import welcome_new_member, handle_message
 from config import (
-    BOT_TOKEN, 
-    REDIS_URL, 
-    SUPABASE_URL, 
-    SUPABASE_KEY,
-    LINKEDIN_CLIENT_ID,
-    LINKEDIN_CLIENT_SECRET,
-    LINKEDIN_REDIRECT_URI,
-    LINKEDIN_POST_URL,
-    LINKEDIN_ACCESS_TOKEN,
-    LINKEDIN_SCOPE,
-    COMPANY_PAGE_ID,
-    LINKEDIN_POST_ID
+    BOT_TOKEN,
+    SUPABASE_URL,
+    SUPABASE_KEY
 )
-import redis
 from supabase import create_client, Client
-from utils.linkedin_utils import LinkedInConfig, LinkedInTokenManager, LinkedInVerificationManager
 
-# Configure logging
+# Configure logging with detailed format
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-class CustomApplication(Application):
-    """Custom Application class with additional clients."""
+class BotApplication(Application):
+    """Enhanced Application class with integrated service clients."""
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supabase = None
-        self.redis_client = None
-        self.linkedin_token_manager = None
-        self.linkedin_verification_manager = None
+        self.supabase: Optional[Client] = None
+        self.start_time: datetime = datetime.now()
 
     @classmethod
     def builder(cls):
-        return CustomDefaultBuilder()
+        return BotApplicationBuilder()
 
-class CustomDefaultBuilder(Application.builder().__class__):
+    async def shutdown(self) -> None:
+        """Enhanced shutdown with proper cleanup of resources."""
+        logger.info("Initiating graceful shutdown...")
+        
+        try:
+            # Call parent shutdown
+            await super().shutdown()
+            logger.info("Application shutdown complete")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
+            raise
+
+class BotApplicationBuilder(Application.builder().__class__):
+    """Enhanced application builder with additional configuration options."""
+    
     def __init__(self):
         super().__init__()
-        self._application_class = CustomApplication
-        self._supabase = None
-        self._redis_client = None
-        self._linkedin_config = None
+        self._application_class = BotApplication
+        self._supabase: Optional[Client] = None
 
-    def supabase_client(self, client: Client):
+    def with_supabase(self, client: Client):
+        """Configure Supabase client."""
         self._supabase = client
         return self
 
-    def redis_client(self, client: redis.Redis):
-        self._redis_client = client
-        return self
-
-    def linkedin_config(self, config: LinkedInConfig):
-        self._linkedin_config = config
-        return self
-
-    def build(self) -> CustomApplication:
+    def build(self) -> BotApplication:
+        """Build the application with all configured components."""
         app = super().build()
         app.supabase = self._supabase
-        app.redis_client = self._redis_client
-        
-        # Initialize LinkedIn managers
-        app.linkedin_token_manager = LinkedInTokenManager(
-            app.redis_client,
-            self._linkedin_config
-        )
-        
-        app.linkedin_verification_manager = LinkedInVerificationManager(
-            app.redis_client,
-            app.linkedin_token_manager,
-            self._linkedin_config
-        )
-        
         return app
 
-def create_application():
-    """Create and configure the application with all handlers."""
+async def initialize_application() -> BotApplication:
+    """Initialize and configure the bot application with all required components."""
     try:
-        # Initialize clients
-        redis_client = redis.from_url(REDIS_URL)
+        # Initialize Supabase client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
-        # Create LinkedIn configuration
-        linkedin_config = LinkedInConfig(
-            client_id=LINKEDIN_CLIENT_ID,
-            client_secret=LINKEDIN_CLIENT_SECRET,
-            redirect_uri=LINKEDIN_REDIRECT_URI,
-            post_url=LINKEDIN_POST_URL,
-            access_token=LINKEDIN_ACCESS_TOKEN,
-            scope=LINKEDIN_SCOPE,
-            company_page_id=COMPANY_PAGE_ID,
-            post_id=LINKEDIN_POST_ID
-        )
 
-        # Create application with all clients
-        application = CustomApplication.builder()\
-            .token("7495077361:AAHgvegC8lWrL75Ykt8rwgzcsTqoptWJFd0")\
-            .supabase_client(supabase)\
-            .redis_client(redis_client)\
-            .linkedin_config(linkedin_config)\
+        # Build application with components
+        application = BotApplication.builder()\
+            .token(BOT_TOKEN)\
+            .with_supabase(supabase)\
             .build()
 
-        # Initialize UserCommandHandler with all managers
+        # Initialize handlers
         user_handler = UserCommandHandler(
-            redis_client=redis_client,
-            supabase_client=supabase,
-            linkedin_config=linkedin_config,
-            linkedin_token_manager=application.linkedin_token_manager,
-            linkedin_verification_manager=application.linkedin_verification_manager
+            supabase_client=supabase
         )
 
-        # Add command handlers
+        # Register command handlers
         application.add_handler(CommandHandler("start", user_handler.start))
         application.add_handler(CommandHandler("sendcv", user_handler.send_cv))
         application.add_handler(CommandHandler("myid", user_handler.my_id))
-        # Uncomment if needed
-        # application.add_handler(CommandHandler("verify", user_handler.verify_linkedin))
         application.add_handler(CallbackQueryHandler(user_handler.callback_handler))
 
-        # Add admin and message handlers
+        # Register admin handlers
         application.add_handler(CommandHandler("tagall", tag_all))
         application.add_handler(CommandHandler("offremploi", offremploi))
-        application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
+
+        # Register message handlers
+        application.add_handler(MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS,
+            welcome_new_member
+        ))
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_message
+        ))
+
         return application
-    
+        
     except Exception as e:
-        logger.error(f"Error creating application: {str(e)}")
+        logger.error(f"Failed to initialize application: {str(e)}")
         raise
 
 async def main():
-    """Main entry point to run the application."""
-    application = create_application()
-    
-    if not application:
-        logger.error("Failed to create application. Exiting...")
-        return
-
-    # Graceful shutdown handling
-    loop = asyncio.get_running_loop()
-    for sig in [signal.SIGINT, signal.SIGTERM]:
-        loop.add_signal_handler(
-            sig, lambda: asyncio.create_task(application.shutdown())
-        )
-
-    await application.initialize()
-    await application.start()
-    logger.info("Bot started successfully")
-    await application.run_polling()
-    await application.shutdown()
-    
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(main())
-#     except Exception as e:
-#         logger.error(f"Bot encountered an error: {str(e)}")
-#         exit(1)
-
-
-
-
-
-
-
-
-# # main.py
-# import os
-# import logging
-# import redis.asyncio as redis
-# from telegram.ext import Application, CommandHandler, CallbackQueryHandler
-# from dotenv import load_dotenv
-# from linkedin_utils import LinkedInConfig, LinkedInManager
-# from user_handlers import UserHandler
-
-# load_dotenv()
-
-# # Configure logging
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-# )
-# logger = logging.getLogger(__name__)
-
-# def create_application():
-#     """Create and configure the application"""
-#     try:
-#         # Initialize Redis client
-#         redis_client = redis.from_url(os.getenv('REDIS_URL'))
-
-#         # Create LinkedIn configuration
-#         linkedin_config = LinkedInConfig(
-#             client_id=os.getenv('LINKEDIN_CLIENT_ID'),
-#             client_secret=os.getenv('LINKEDIN_CLIENT_SECRET'),
-#             redirect_uri=os.getenv('LINKEDIN_REDIRECT_URI'),
-#             post_url=os.getenv('LINKEDIN_POST_URL')
-#         )
-
-#         # Initialize LinkedIn manager
-#         linkedin_manager = LinkedInManager(redis_client, linkedin_config)
-
-#         # Create application
-#         application = Application.builder().token(os.getenv('BOT_TOKEN')).build()
+    """Main entry point for the bot application."""
+    try:
+        # Initialize application
+        application = await initialize_application()
         
-#         # Store managers in application context
-#         application.linkedin_manager = linkedin_manager
+        if not application:
+            logger.error("Failed to create application. Exiting...")
+            return
 
-#         # Initialize handlers
-#         user_handler = UserHandler(linkedin_manager)
+        # Set up signal handlers for graceful shutdown
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(application.shutdown())
+            )
 
-#         # Add command handlers
-#         application.add_handler(CommandHandler("start", user_handler.start_command))
-#         application.add_handler(CommandHandler("verify", user_handler.verify_command))
-#         application.add_handler(CallbackQueryHandler(user_handler.callback_handler))
+        # Start the application
+        await application.initialize()
+        await application.start()
+        logger.info("Bot started successfully")
+        
+        # Run the application
+        await application.run_polling(
+            drop_pending_updates=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Critical error in main: {str(e)}")
+        raise
+    finally:
+        # Ensure proper shutdown
+        await application.shutdown()
+        logger.info("Application shutdown complete")
 
-#         return application
-
-#     except Exception as e:
-#         logger.error(f"Error creating application: {str(e)}")
-#         raise
-
-# if __name__ == "__main__":
-#     try:
-#         app = create_application()
-#         logger.info("Starting bot...")
-#         app.run_polling()
-#     except Exception as e:
-#         logger.error(f"Bot encountered an error: {str(e)}")
-#         exit(1)
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot encountered an error: {str(e)}")
+        exit(1)
