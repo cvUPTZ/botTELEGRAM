@@ -1,14 +1,14 @@
 requests==2.31.0
 python-dotenv==1.0.0
-Flask[async]==3.0.0            # Flask version with async support
+Flask[async]==3.0.0
 python-telegram-bot[webhooks]==20.0
-dash==2.9.3  # or the latest stable version
-Werkzeug==3.0.0  # version known to work with Dashs
+dash==2.9.3
+Werkzeug==3.0.0
 quart==0.19.4
 hypercorn==0.15.0
 supabase==1.0.3
-PyJWT
-redis
-aiohttp
-aioredis
-setuptools
+PyJWT==2.6.0
+redis==4.5.1
+aioredis==2.0.1
+aiohttp==3.8.3
+setuptools==67.6.0
