@@ -1,5 +1,5 @@
 import logging
-import aiohttp
+# import aiohttp
 import asyncio
 import secrets
 import string
@@ -10,6 +10,8 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError, ConnectionError
 import aioredis
 from aioredis import Redis
+import httpx
+
 # import asyncio
 # from typing import Optional
 # from redis.exceptions import RedisError, ConnectionError
@@ -138,6 +140,7 @@ class LinkedInTokenManager:
             logger.error(f"Error storing token: {e}")
             raise
 
+
 class LinkedInAPI:
     def __init__(self, access_token: str):
         self.access_token = access_token
@@ -147,54 +150,48 @@ class LinkedInAPI:
             'X-Restli-Protocol-Version': '2.0.0',
             'Content-Type': 'application/json'
         }
-        self._session = None
+        self._client = None
 
     async def __aenter__(self):
+        if self._client is None:
+            self._client = httpx.AsyncClient(headers=self.headers, timeout=30)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._session and not self._session.closed:
-            await self._session.close()
-
-    async def get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=30)
-            )
-        return self._session
+        if self._client:
+            await self._client.aclose()
 
     async def get_post_comments(self, post_id: str) -> list:
         for attempt in range(3):  # Max 3 retries
             try:
-                session = await self.get_session()
-                async with session.get(
-                    f"{self.base_url}/socialActions/{quote(post_id, safe='')}/comments"
-                ) as response:
-                    if response.status == 429:  # Rate limit
-                        wait_time = int(response.headers.get('Retry-After', 60))
-                        await asyncio.sleep(wait_time)
-                        continue
-                    
-                    response.raise_for_status()
-                    data = await response.json()
-                    
-                    return [
-                        {
-                            'text': comment.get('message', {}).get('text', ''),
-                            'actor': comment.get('actor', ''),
-                            'created': comment.get('created', {}).get('time')
-                        }
-                        for comment in data.get('elements', [])
-                    ]
-            
-            except aiohttp.ClientError as e:
+                url = f"{self.base_url}/socialActions/{quote(post_id, safe='')}/comments"
+                response = await self._client.get(url)
+
+                if response.status_code == 429:  # Rate limit
+                    wait_time = int(response.headers.get('Retry-After', 60))
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+
+                return [
+                    {
+                        'text': comment.get('message', {}).get('text', ''),
+                        'actor': comment.get('actor', ''),
+                        'created': comment.get('created', {}).get('time')
+                    }
+                    for comment in data.get('elements', [])
+                ]
+
+            except httpx.HTTPError as e:
                 logger.error(f"API request failed (attempt {attempt + 1}/3): {e}")
                 if attempt == 2:  # Last attempt
                     raise LinkedInError(f"API request failed: {e}", LinkedInErrorCode.API_ERROR)
                 await asyncio.sleep(2 ** attempt)
-        
+
         return []
+
 
 class LinkedInVerificationManager:
     def __init__(self, redis_manager: Redis, config: LinkedInConfig, verification_ttl: int = 3600):
