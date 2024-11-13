@@ -48,7 +48,7 @@ redis_client = Redis(
 )
 
 # Initialize LinkedIn components
-config = LinkedInConfig(...)
+config = LinkedInConfig
 linkedin_api = LinkedInAPI(access_token=config.access_token)
 verification_manager = LinkedInVerificationManager(
     redis_client=redis_client,
