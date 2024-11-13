@@ -167,65 +167,105 @@ class LinkedInTokenManager:
             logger.error(f"Error getting refresh token for user {user_id}: {str(e)}")
             return None
 
+import logging
+import aiohttp
+import asyncio
+from typing import Optional, Tuple, Dict, Any
+from datetime import datetime, timedelta
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from urllib.parse import quote
+import requests
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class LinkedInAPI:
+    """Class to handle LinkedIn API interactions"""
+    def __init__(self, access_token: str):
+        self.access_token = access_token
+        self.base_url = "https://api.linkedin.com/v2"
+        self.headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'X-Restli-Protocol-Version': '2.0.0',
+            'Content-Type': 'application/json'
+        }
+
+    async def get_post_comments(self, post_id: str) -> list:
+        """
+        Fetch comments on a LinkedIn post asynchronously.
+        
+        Args:
+            post_id (str): The URN of the LinkedIn post
+            
+        Returns:
+            list: List of comment texts or empty list if failed
+        """
+        try:
+            encoded_post_id = quote(post_id, safe='')
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.base_url}/socialActions/{encoded_post_id}/comments",
+                    headers=self.headers
+                ) as response:
+                    if response.status != 200:
+                        logger.error(f"Error fetching comments: {await response.text()}")
+                        return []
+                    
+                    comments_data = await response.json()
+                    comments = comments_data.get('elements', [])
+                    return [comment.get('message', {}).get('text', '') 
+                           for comment in comments]
+                    
+        except Exception as e:
+            logger.error(f"Error fetching comments: {str(e)}")
+            return []
+
 class LinkedInVerificationManager:
-    """Manage LinkedIn comment verification process with temp file."""
+    """Manage LinkedIn comment verification process using LinkedIn API."""
     
     def __init__(self, 
                  redis_client: Optional[Redis], 
-                 token_manager: LinkedInTokenManager, 
-                 config: LinkedInConfig, 
+                 token_manager: 'LinkedInTokenManager', 
+                 config: 'LinkedInConfig', 
                  verification_ttl: int = 3600):
         self.redis = redis_client
         self.token_manager = token_manager
         self.config = config
         self.verification_ttl = verification_ttl
         self.verification_code_prefix = "linkedin_verification_code:"
+        self.linkedin_api = LinkedInAPI(config.access_token)
 
-    async def verify_linkedin_comment(self, user_id: int, max_retries: int = 3, retry_delay: float = 1.0) -> Tuple[bool, str]:
-        """Verify user's LinkedIn comment using a temporary file."""
-        temp_file = None
+    async def verify_linkedin_comment(self, user_id: int, verification_code: str) -> Tuple[bool, str]:
+        """Verify user's LinkedIn comment using LinkedIn API."""
         try:
-            # Ensure Redis connection is available
-            if not self.redis:
-                return (False, "❌ Erreur de connexion au stockage temporaire.")
-
             # Get verification code from Redis
             stored_code = await self.redis.get(f"{self.verification_code_prefix}{user_id}")
             if not stored_code:
                 return (False, "❌ Code de vérification expiré ou introuvable.")
             
-            verification_code = stored_code.decode('utf-8')
+            stored_code = stored_code.decode('utf-8')
             
-            # Create temporary file and write verification code
-            temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False)
-            temp_file.write(verification_code)
-            temp_file.close()
+            # Fetch comments from LinkedIn API
+            comments = await self.linkedin_api.get_post_comments(self.config.post_id)
             
-            # Get code from callback data (assuming it's passed to the method)
-            user_submitted_code = verification_code  # Replace with actual user submitted code
-            
-            # Read code from temp file and compare
-            with open(temp_file.name, 'r') as f:
-                stored_code = f.read().strip()
-                
-                if user_submitted_code == stored_code:
-                    # Codes match, proceed with sending CV
-                    await self._cleanup_verification_data(user_id)
-                    return (True, "✅ Code vérifié avec succès! Envoi du CV en cours...")
-                else:
-                    return (False, "❌ Code de vérification incorrect.")
+            # Check if verification code exists in any comment
+            if any(stored_code in comment for comment in comments):
+                await self._cleanup_verification_data(user_id)
+                return (True, "✅ Code vérifié avec succès! Envoi du CV en cours...")
+            else:
+                return (False, "❌ Code de vérification non trouvé dans les commentaires. Assurez-vous d'avoir commenté avec le bon code.")
                     
-        except (RedisError, IOError) as e:
-            logger.error(f"Error during verification: {str(e)}")
+        except RedisError as e:
+            logger.error(f"Redis error during verification: {str(e)}")
             return (False, "❌ Erreur lors de la vérification du code.")
-            
-        finally:
-            # Clean up temporary file
-            if temp_file and os.path.exists(temp_file.name):
-                try:
-                    os.unlink(temp_file.name)
-                except OSError as e:
-                    logger.error(f"Error removing temporary file: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error during verification: {str(e)}")
+            return (False, "❌ Une erreur s'est produite lors de la vérification.")
 
     async def _cleanup_verification_data(self, user_id: int) -> None:
         """Clean up verification data from Redis."""
@@ -234,56 +274,6 @@ class LinkedInVerificationManager:
         except RedisError as e:
             logger.error(f"Error during cleanup: {str(e)}")
 
-    # # Modified handle_linkedin_verification method for UserCommandHandler
-    # async def handle_linkedin_verification(
-    #     self,
-    #     query: Update.callback_query,
-    #     user_id: int,
-    #     context: ContextTypes.DEFAULT_TYPE
-    # ) -> None:
-    #     """Handle LinkedIn verification process with temp file."""
-    #     try:
-    #         verification_code = query.data.split("_")[1]
-            
-    #         # Store verification code in Redis
-    #         await self.redis_client.set(
-    #             f"linkedin_verification_code:{user_id}",
-    #             verification_code,
-    #             ex=3600  # 1 hour expiry
-    #         )
-            
-    #         await query.message.edit_text("🔄 Vérification du code en cours...")
-            
-    #         # Verify code using temp file
-    #         verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
-            
-    #         if verified:
-    #             # Get email and CV type from Redis
-    #             stored_data = await self.get_stored_verification_data(user_id)
-    #             if not all(stored_data.values()):
-    #                 await query.message.edit_text(
-    #                     "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
-    #                 )
-    #                 return
-                    
-    #             # Send CV
-    #             result = await send_email_with_cv(
-    #                 stored_data['email'],
-    #                 stored_data['cv_type'],
-    #                 user_id,
-    #                 self.supabase
-    #             )
-                
-    #             await self.cleanup_verification_data(user_id)
-    #             await query.message.edit_text(result)
-    #         else:
-    #             await query.message.edit_text(message)
-                
-    #     except Exception as e:
-    #         logger.error(f"Error in verification process: {str(e)}")
-    #         await query.message.edit_text(
-    #             "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
-    #         )
 
 
 
@@ -421,6 +411,56 @@ def create_linkedin_managers(redis_url: str, config: LinkedInConfig) -> Tuple[Li
         raise
 
 
+    # # Modified handle_linkedin_verification method for UserCommandHandler
+    # async def handle_linkedin_verification(
+    #     self,
+    #     query: Update.callback_query,
+    #     user_id: int,
+    #     context: ContextTypes.DEFAULT_TYPE
+    # ) -> None:
+    #     """Handle LinkedIn verification process with temp file."""
+    #     try:
+    #         verification_code = query.data.split("_")[1]
+            
+    #         # Store verification code in Redis
+    #         await self.redis_client.set(
+    #             f"linkedin_verification_code:{user_id}",
+    #             verification_code,
+    #             ex=3600  # 1 hour expiry
+    #         )
+            
+    #         await query.message.edit_text("🔄 Vérification du code en cours...")
+            
+    #         # Verify code using temp file
+    #         verified, message = await self.verification_manager.verify_linkedin_comment(user_id)
+            
+    #         if verified:
+    #             # Get email and CV type from Redis
+    #             stored_data = await self.get_stored_verification_data(user_id)
+    #             if not all(stored_data.values()):
+    #                 await query.message.edit_text(
+    #                     "❌ Données de demande expirées. Veuillez recommencer avec /sendcv"
+    #                 )
+    #                 return
+                    
+    #             # Send CV
+    #             result = await send_email_with_cv(
+    #                 stored_data['email'],
+    #                 stored_data['cv_type'],
+    #                 user_id,
+    #                 self.supabase
+    #             )
+                
+    #             await self.cleanup_verification_data(user_id)
+    #             await query.message.edit_text(result)
+    #         else:
+    #             await query.message.edit_text(message)
+                
+    #     except Exception as e:
+    #         logger.error(f"Error in verification process: {str(e)}")
+    #         await query.message.edit_text(
+    #             "❌ Une erreur s'est produite. Veuillez réessayer avec /sendcv"
+    #         )
 
 
 # # linkedin_utils.py
