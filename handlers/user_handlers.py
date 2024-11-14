@@ -110,6 +110,17 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     email = context.args[0]
     cv_type = context.args[1].lower()
 
+    # Check Redis for LinkedIn verification
+    verified_data = await asyncio.to_thread(
+        redis_client.get, 
+        f"linkedin_verified:{user_id}"
+    )
+    
+    if not verified_data and user_id not in ADMIN_IDS:
+        # If not verified and not admin, start verification process
+        await start_linkedin_verification(update, context)
+        return
+
     # Validate CV type
     if cv_type not in ['junior', 'senior']:
         await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
@@ -121,13 +132,13 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        # Send the CV (note we're passing the required parameters)
+        # Send the CV
         result = await send_email_with_cv(email, cv_type, user_id, context.bot.supabase)
         
         # Send the result message back to the user
         await update.message.reply_text(result)
         
-        # If successful, save to local tracking
+        # If successful, save to sent emails record
         if result.startswith('✅'):
             sent_emails[str(user_id)] = {
                 'email': email,
