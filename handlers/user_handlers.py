@@ -106,11 +106,6 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await send_usage_instructions(update.message)
         return
 
-    # # Check LinkedIn verification first
-    # if not is_linkedin_verified(user_id):
-    #     await start_linkedin_verification(update, context)
-    #     return
-
     # Get email and CV type from arguments
     email = context.args[0]
     cv_type = context.args[1].lower()
@@ -126,24 +121,20 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        # Get LinkedIn profile (assuming you have this function implemented)
-        linkedin_profile = get_linkedin_profile(user_id)
+        # Send the CV (note we're passing the required parameters)
+        result = await send_email_with_cv(email, cv_type, user_id, context.bot.supabase)
         
-        # Send the CV
-        success = await send_email_with_cv(email, cv_type, linkedin_profile)
+        # Send the result message back to the user
+        await update.message.reply_text(result)
         
-        if success:
-            # Save to sent emails record
+        # If successful, save to local tracking
+        if result.startswith('✅'):
             sent_emails[str(user_id)] = {
                 'email': email,
                 'cv_type': cv_type,
                 'timestamp': str(datetime.now())
             }
             save_sent_emails(sent_emails)
-            
-            await update.message.reply_text('✅ CV envoyé avec succès!')
-        else:
-            await update.message.reply_text('❌ Erreur lors de l\'envoi du CV. Veuillez réessayer.')
             
     except Exception as e:
         logger.error(f"Error sending CV: {str(e)}")
