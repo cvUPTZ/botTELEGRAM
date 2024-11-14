@@ -7,6 +7,7 @@ from handlers.user_handlers import start, ask_question, send_cv, my_id
 from handlers.message_handlers import welcome_new_member, handle_message
 import logging
 
+
 # Logging configuration
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
