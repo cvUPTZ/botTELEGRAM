@@ -3,7 +3,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 from datetime import datetime
-
+import json
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
