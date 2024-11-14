@@ -2,40 +2,33 @@ import re
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
+from datetime import datetime
 
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
-from utils.linkedin_utils import is_linkedin_verified, get_linkedin_profile
-from config import LINKEDIN_REDIRECT_URI
-
-import json  # Import json for saving data to JSON files
 from config import (
-    QUESTIONS_TABLE,
-    SENT_EMAILS_TABLE,
-    SCRAPED_DATA_TABLE,
-    USERS_TABLE,
-    QUESTIONS_FILE,  # Add this constant for JSON file paths
     SENT_EMAILS_FILE,
-    SCRAPED_DATA_FILE,
+    QUESTIONS_FILE
 )
 
-
 logger = logging.getLogger(__name__)
+
+# Example admin user IDs (replace with your actual admin IDs)
+ADMIN_IDS = {1719899525, 987654321}  # Add your actual admin user IDs here
+
 def save_sent_emails(sent_emails):
     try:
         with open(SENT_EMAILS_FILE, 'w') as json_file:
-            json.dump(sent_emails, json_file, indent=4)  # Using indent for pretty printing
+            json.dump(sent_emails, json_file, indent=4)
     except Exception as e:
         logger.error(f"Error saving sent emails to JSON file: {str(e)}")
-        
-        
+
 def load_sent_emails():
     try:
         with open(SENT_EMAILS_FILE, 'r') as json_file:
             return json.load(json_file)
     except FileNotFoundError:
-        # If the file doesn't exist, return an empty dictionary
         return {}
     except json.JSONDecodeError:
         logger.error("Error decoding JSON from the sent emails file")
@@ -51,8 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             '👋 Bonjour ! Voici les commandes disponibles :\n\n'
             '/question - Poser une question\n'
             '/liste_questions - Voir et répondre aux questions (réservé aux administrateurs)\n'
-            '/sendcv - Recevoir un CV (nécessite de suivre notre page LinkedIn)\n'
-            '📄 N\'oubliez pas de suivre notre page LinkedIn avant de demander un CV !'
+            '/sendcv - Recevoir un CV\n'
         )
         logger.info("Start message sent successfully")
     except Exception as e:
@@ -76,26 +68,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
 
-
-
 # Load sent emails at the beginning of your script
 sent_emails = load_sent_emails()
-
-    
-    
-
-# Example admin user IDs (replace with your actual admin IDs)
-ADMIN_IDS = {1719899525, 987654321}  # Add your actual admin user IDs here
-
-async def start_linkedin_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    auth_url = f"{LINKEDIN_REDIRECT_URI.replace('/linkedin-callback', '')}/start-linkedin-auth/{user_id}"
-    keyboard = [[InlineKeyboardButton("Verify with LinkedIn", url=auth_url)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Please click the button below to verify your LinkedIn profile:",
-        reply_markup=reply_markup
-    )
 
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -109,17 +83,6 @@ async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Get email and CV type from arguments
     email = context.args[0]
     cv_type = context.args[1].lower()
-
-    # Check Redis for LinkedIn verification
-    verified_data = await asyncio.to_thread(
-        redis_client.get, 
-        f"linkedin_verified:{user_id}"
-    )
-    
-    if not verified_data and user_id not in ADMIN_IDS:
-        # If not verified and not admin, start verification process
-        await start_linkedin_verification(update, context)
-        return
 
     # Validate CV type
     if cv_type not in ['junior', 'senior']:
@@ -157,6 +120,7 @@ async def send_usage_instructions(message):
         '/sendcv [email] [junior|senior]\n\n'
         'Exemple : /sendcv email@gmail.com junior'
     )
+
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
