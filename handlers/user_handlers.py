@@ -111,4 +111,4 @@ async def send_usage_instructions(message):
     )
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')s
+    await update.message.reply_text(f'🔍 Votre ID est : {user_id}')
