@@ -5,7 +5,7 @@ from email import encoders
 from typing import Dict, Any
 from datetime import datetime
 import logging
-import json
+import motor.motor_asyncio
 from config import (
     EMAIL_ADDRESS,
     EMAIL_PASSWORD,
@@ -13,27 +13,29 @@ from config import (
     SMTP_PORT,
     CV_FILES,
     ADMIN_USER_IDS,
-    SENT_EMAILS_FILE
+    MONGODB_URI
 )
 
 logger = logging.getLogger(__name__)
 
-def load_sent_emails():
-    try:
-        with open(SENT_EMAILS_FILE, 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        logger.error("Error decoding JSON from sent emails file")
-        return {}
+# Initialize MongoDB client
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGODB_URI)
+db = client.cvbot
+sent_emails_collection = db.sent_emails
 
-def save_sent_emails(sent_emails):
-    try:
-        with open(SENT_EMAILS_FILE, 'w') as file:
-            json.dump(sent_emails, file, indent=4)
-    except Exception as e:
-        logger.error(f"Error saving sent emails: {str(e)}")
+async def check_previous_sends(email: str, user_id: int):
+    """Check if email or user has previously received a CV"""
+    # Check if email has already received a CV
+    email_record = await sent_emails_collection.find_one({"email": email})
+    if email_record:
+        return f'📩 Vous avez déjà reçu un CV de type {email_record["cv_type"]}.'
+    
+    # Check if user has already received a CV
+    user_record = await sent_emails_collection.find_one({"user_id": str(user_id)})
+    if user_record:
+        return f'📩 Vous avez déjà reçu un CV de type {user_record["cv_type"]}.'
+    
+    return None
 
 async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
     """Send CV via email and track sending history"""
@@ -43,23 +45,11 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
     is_admin = user_id in ADMIN_USER_IDS
     
     try:
-        # Load existing sent emails
-        sent_emails = load_sent_emails()
-        
         # Check previous sends for non-admin users
         if not is_admin:
-            # Check if email has already received a CV
-            for record in sent_emails.values():
-                if record['email'] == email:
-                    return f'📩 Vous avez déjà reçu un CV de type {record["cv_type"]}.'
-                
-            # Check if user has already received a CV
-            if str(user_id) in sent_emails:
-                previous_send = sent_emails[str(user_id)]
-                if previous_send['cv_type'] == cv_type:
-                    return f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
-                else:
-                    return f'📩 Vous avez déjà reçu un CV de type {previous_send["cv_type"]}.'
+            previous_send = await check_previous_sends(email, user_id)
+            if previous_send:
+                return previous_send
 
         # Create and send email
         msg = MIMEMultipart()
@@ -81,12 +71,12 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
         
         # Record sent email for non-admin users
         if not is_admin:
-            sent_emails[str(user_id)] = {
+            await sent_emails_collection.insert_one({
                 "email": email,
                 "cv_type": cv_type,
-                "sent_at": datetime.utcnow().isoformat()
-            }
-            save_sent_emails(sent_emails)
+                "user_id": str(user_id),
+                "sent_at": datetime.utcnow()
+            })
         
         return (
             f'✅ Le CV de type {cv_type.capitalize()} a été envoyé à {email}. ✉️\n\n'
@@ -108,3 +98,20 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
     except Exception as e:
         logger.error(f"Unexpected error sending email: {str(e)}")
         return f'❌ Une erreur inattendue s\'est produite lors de l\'envoi de l\'e-mail'
+
+# Example function to get statistics (optional)
+async def get_sent_email_stats():
+    """Get statistics about sent emails"""
+    try:
+        total_sent = await sent_emails_collection.count_documents({})
+        junior_sent = await sent_emails_collection.count_documents({"cv_type": "junior"})
+        senior_sent = await sent_emails_collection.count_documents({"cv_type": "senior"})
+        
+        return {
+            "total_sent": total_sent,
+            "junior_sent": junior_sent,
+            "senior_sent": senior_sent
+        }
+    except Exception as e:
+        logger.error(f"Error getting email stats: {str(e)}")
+        return None
