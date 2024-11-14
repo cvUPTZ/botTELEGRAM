@@ -37,8 +37,19 @@ async def check_previous_sends(email: str, user_id: int):
     
     return None
 
-async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
-    """Send CV via email and track sending history"""
+async def send_email_with_cv(email: str, cv_type: str, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Send CV via email and track sending history
+    
+    Args:
+        email: Recipient email address
+        cv_type: Type of CV (junior/senior)
+        user_id: Telegram user ID
+        context: Telegram context object containing bot instance
+    
+    Returns:
+        str: Success or error message
+    """
     if cv_type.lower() not in CV_FILES:
         return '❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".'
     
