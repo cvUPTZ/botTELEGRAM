@@ -13,3 +13,4 @@ aioredis
 aiohttp
 setuptools
 httpx
+motor
