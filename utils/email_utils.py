@@ -5,6 +5,7 @@ from email import encoders
 from typing import Dict, Any
 from datetime import datetime
 import logging
+import json
 from config import (
     EMAIL_ADDRESS,
     EMAIL_PASSWORD,
@@ -12,12 +13,29 @@ from config import (
     SMTP_PORT,
     CV_FILES,
     ADMIN_USER_IDS,
-    SENT_EMAILS_TABLE
+    SENT_EMAILS_FILE
 )
 
 logger = logging.getLogger(__name__)
 
-async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -> str:
+def load_sent_emails():
+    try:
+        with open(SENT_EMAILS_FILE, 'r') as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        logger.error("Error decoding JSON from sent emails file")
+        return {}
+
+def save_sent_emails(sent_emails):
+    try:
+        with open(SENT_EMAILS_FILE, 'w') as file:
+            json.dump(sent_emails, file, indent=4)
+    except Exception as e:
+        logger.error(f"Error saving sent emails: {str(e)}")
+
+async def send_email_with_cv(email: str, cv_type: str, user_id: int) -> str:
     """Send CV via email and track sending history"""
     if cv_type.lower() not in CV_FILES:
         return '❌ Type de CV incorrect. Veuillez utiliser "junior" ou "senior".'
@@ -25,22 +43,19 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
     is_admin = user_id in ADMIN_USER_IDS
     
     try:
+        # Load existing sent emails
+        sent_emails = load_sent_emails()
+        
         # Check previous sends for non-admin users
         if not is_admin:
-            # Execute queries with await if necessary
-            response = await supabase.table(SENT_EMAILS_TABLE)\
-                .select('*')\
-                .filter('email', 'eq', email)\
-                .execute()
-
-            if not response.data:
-                response = await supabase.table(SENT_EMAILS_TABLE)\
-                    .select('*')\
-                    .filter('user_id', 'eq', str(user_id))\
-                    .execute()
-            
-            if response.data:
-                previous_send = response.data[0]
+            # Check if email has already received a CV
+            for record in sent_emails.values():
+                if record['email'] == email:
+                    return f'📩 Vous avez déjà reçu un CV de type {record["cv_type"]}.'
+                
+            # Check if user has already received a CV
+            if str(user_id) in sent_emails:
+                previous_send = sent_emails[str(user_id)]
                 if previous_send['cv_type'] == cv_type:
                     return f'📩 Vous avez déjà reçu un CV de type {cv_type}.'
                 else:
@@ -64,14 +79,14 @@ async def send_email_with_cv(email: str, cv_type: str, user_id: int, supabase) -
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.sendmail(EMAIL_ADDRESS, email, msg.as_string())
         
-        # Record sent email for non-admin users with await
+        # Record sent email for non-admin users
         if not is_admin:
-            await supabase.table(SENT_EMAILS_TABLE).insert({
+            sent_emails[str(user_id)] = {
                 "email": email,
                 "cv_type": cv_type,
-                "user_id": str(user_id),
-                "sent_at": datetime.utcnow().isoformat(),
-            }).execute()
+                "sent_at": datetime.utcnow().isoformat()
+            }
+            save_sent_emails(sent_emails)
         
         return (
             f'✅ Le CV de type {cv_type.capitalize()} a été envoyé à {email}. ✉️\n\n'
