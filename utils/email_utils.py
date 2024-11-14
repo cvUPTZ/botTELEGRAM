@@ -1,5 +1,7 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
+from telegram.ext import ContextTypes
+
 from email.mime.base import MIMEBase
 from email import encoders
 from typing import Dict, Any
