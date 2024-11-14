@@ -2,6 +2,7 @@ import re
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
+
 from utils.decorators import private_chat_only
 from utils.file_utils import load_questions, save_questions
 from utils.email_utils import send_email_with_cv
@@ -99,9 +100,54 @@ async def start_linkedin_verification(update: Update, context: ContextTypes.DEFA
 @private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    if not is_linkedin_verified(user_id):
-        await start_linkedin_verification(update, context)
+    
+    # Check if any arguments were provided
+    if not context.args or len(context.args) != 2:
+        await send_usage_instructions(update.message)
         return
+
+    # # Check LinkedIn verification first
+    # if not is_linkedin_verified(user_id):
+    #     await start_linkedin_verification(update, context)
+    #     return
+
+    # Get email and CV type from arguments
+    email = context.args[0]
+    cv_type = context.args[1].lower()
+
+    # Validate CV type
+    if cv_type not in ['junior', 'senior']:
+        await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
+        return
+
+    # Validate email format
+    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        await update.message.reply_text('❌ Format d\'email invalide.')
+        return
+
+    try:
+        # Get LinkedIn profile (assuming you have this function implemented)
+        linkedin_profile = get_linkedin_profile(user_id)
+        
+        # Send the CV
+        success = await send_email_with_cv(email, cv_type, linkedin_profile)
+        
+        if success:
+            # Save to sent emails record
+            sent_emails[str(user_id)] = {
+                'email': email,
+                'cv_type': cv_type,
+                'timestamp': str(datetime.now())
+            }
+            save_sent_emails(sent_emails)
+            
+            await update.message.reply_text('✅ CV envoyé avec succès!')
+        else:
+            await update.message.reply_text('❌ Erreur lors de l\'envoi du CV. Veuillez réessayer.')
+            
+    except Exception as e:
+        logger.error(f"Error sending CV: {str(e)}")
+        await update.message.reply_text('❌ Une erreur est survenue. Veuillez réessayer plus tard.')
 
 async def send_usage_instructions(message):
     await message.reply_text(
