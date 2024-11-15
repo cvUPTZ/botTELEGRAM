@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from telegram.request import HTTPXRequest
 from utils.email_utils import send_email_with_cv
 from config import ADMIN_USER_IDS
-
+import asyncio
 # Configure logging
 logger = logging.getLogger(__name__)
 
