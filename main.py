@@ -3,7 +3,6 @@ import logging
 import signal
 import os
 from datetime import datetime
-import json
 import re
 from typing import Dict, Any
 
@@ -24,12 +23,7 @@ import motor.motor_asyncio
 from config import (
     BOT_TOKEN,
     MONGODB_URI,
-    EMAIL_ADDRESS,
-    EMAIL_PASSWORD,
-    SMTP_SERVER,
-    SMTP_PORT,
-    CV_FILES,
-    ADMIN_USER_IDS
+    ADMIN_USER_IDS,
 )
 
 # Logging configuration
@@ -62,6 +56,66 @@ config.workers = 1
 # Global control flag
 bot_running = True
 
+# Command Handlers
+async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /sendcv command"""
+    try:
+        if not context.args or len(context.args) != 2:
+            await update.message.reply_text(
+                '❌ Format: /sendcv [email] [junior|senior]\n'
+                'Exemple: /sendcv email@example.com junior'
+            )
+            return
+
+        email = context.args[0].lower()
+        cv_type = context.args[1].lower()
+
+        # Validate email format
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            await update.message.reply_text('❌ Format d\'email invalide.')
+            return
+
+        # Validate CV type
+        if cv_type not in ['junior', 'senior']:
+            await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
+            return
+
+        user_id = update.effective_user.id
+        is_admin = user_id in ADMIN_USER_IDS
+
+        # Check previous sends for non-admin users
+        if not is_admin:
+            # Check if email has already received a CV
+            email_record = await sent_emails_collection.find_one({"email": email})
+            if email_record:
+                await update.message.reply_text(
+                    f'📩 Cet email a déjà reçu un CV de type {email_record["cv_type"]}.'
+                )
+                return
+
+            # Check if user has already received a CV
+            user_record = await sent_emails_collection.find_one({"user_id": str(user_id)})
+            if user_record:
+                await update.message.reply_text(
+                    f'📩 Vous avez déjà reçu un CV de type {user_record["cv_type"]}.'
+                )
+                return
+
+        # Send email with CV
+        from utils.email_utils import send_email_with_cv
+        result = await send_email_with_cv(
+            email=email,
+            cv_type=cv_type,
+            user_id=user_id,
+            context=context
+        )
+        
+        await update.message.reply_text(result)
+
+    except Exception as e:
+        logger.error(f"Error in send_cv: {str(e)}", exc_info=True)
+        await update.message.reply_text('❌ Une erreur est survenue lors de l\'envoi du CV.')
+
 class CVBot:
     def __init__(self, token: str):
         self.token = token
@@ -76,7 +130,7 @@ class CVBot:
             CommandHandler("start", self.start),
             CommandHandler("question", self.ask_question),
             CommandHandler("liste_questions", self.liste_questions),
-            CommandHandler("sendcv", self.send_cv),  # The handler registration remains the same
+            CommandHandler("sendcv", send_cv),  # Using the standalone function
             CommandHandler("myid", self.my_id),
             CommandHandler("tagall", self.tag_all),
             CommandHandler("offremploi", self.offremploi),
@@ -104,7 +158,6 @@ class CVBot:
             await self.application.stop()
             await self.application.shutdown()
 
-    # Command Handlers
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command"""
         logger.info(f"Start command received from user {update.effective_user.id}")
@@ -166,66 +219,6 @@ class CVBot:
         except Exception as e:
             logger.error(f"Error listing questions: {str(e)}")
             await update.message.reply_text('❌ Une erreur est survenue lors de la récupération des questions.')
-
-    @staticmethod
-    async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle the /sendcv command"""
-        try:
-            if not context.args or len(context.args) != 2:
-                await update.message.reply_text(
-                    '❌ Format: /sendcv [email] [junior|senior]\n'
-                    'Exemple: /sendcv email@example.com junior'
-                )
-                return
-
-            email = context.args[0].lower()
-            cv_type = context.args[1].lower()
-
-            # Validate email format
-            if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-                await update.message.reply_text('❌ Format d\'email invalide.')
-                return
-
-            # Validate CV type
-            if cv_type not in ['junior', 'senior']:
-                await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
-                return
-
-            user_id = update.effective_user.id
-            is_admin = user_id in ADMIN_USER_IDS
-
-            # Check previous sends for non-admin users
-            if not is_admin:
-                # Check if email has already received a CV
-                email_record = await sent_emails_collection.find_one({"email": email})
-                if email_record:
-                    await update.message.reply_text(
-                        f'📩 Cet email a déjà reçu un CV de type {email_record["cv_type"]}.'
-                    )
-                    return
-
-                # Check if user has already received a CV
-                user_record = await sent_emails_collection.find_one({"user_id": str(user_id)})
-                if user_record:
-                    await update.message.reply_text(
-                        f'📩 Vous avez déjà reçu un CV de type {user_record["cv_type"]}.'
-                    )
-                    return
-
-            # Send email with CV
-            from utils.email_utils import send_email_with_cv
-            result = await send_email_with_cv(
-                email=email,
-                cv_type=cv_type,
-                user_id=user_id,
-                context=context
-            )
-            
-            await update.message.reply_text(result)
-
-        except Exception as e:
-            logger.error(f"Error in send_cv: {str(e)}", exc_info=True)
-            await update.message.reply_text('❌ Une erreur est survenue lors de l\'envoi du CV.')
 
     async def my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /myid command"""
