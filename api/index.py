@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from quart import Quart, request, jsonify
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN
@@ -14,37 +14,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize the Flask app
-app = Flask(__name__)
+# Initialize the Quart app
+app = Quart(__name__)
 
-# Initialize the Telegram Application (Singleton)
-application = Application.builder().token(BOT_TOKEN).build()
+# Global variable for application
+application = None
 
-# Add handlers
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("question", ask_question))
-application.add_handler(CommandHandler("liste_questions", liste_questions))
-application.add_handler(CommandHandler("sendcv", send_cv))
-application.add_handler(CommandHandler("myid", my_id))
-application.add_handler(CommandHandler("tagall", tag_all))
-application.add_handler(CommandHandler("offremploi", offremploi))
-application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+async def init_application():
+    """Initialize and configure the Telegram application"""
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Add handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("question", ask_question))
+    app.add_handler(CommandHandler("liste_questions", liste_questions))
+    app.add_handler(CommandHandler("sendcv", send_cv))
+    app.add_handler(CommandHandler("myid", my_id))
+    app.add_handler(CommandHandler("tagall", tag_all))
+    app.add_handler(CommandHandler("offremploi", offremploi))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    return app
+
+@app.before_serving
+async def startup():
+    """Initialize the bot before the first request"""
+    global application
+    application = await init_application()
 
 @app.route('/')
-def hello():
+async def hello():
     return "Hello, World!"
 
 @app.route('/webhook', methods=['POST'])
-def webhook():
+async def webhook():
+    """Handle incoming Telegram updates"""
     if request.method == "POST":
-        # Process the incoming update
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        application.create_task(application.process_update(update))
-    return jsonify({"status": "ok"})
+        try:
+            # Parse the update
+            json_data = await request.get_json(force=True)
+            update = Update.de_json(json_data, application.bot)
+            
+            # Process the update
+            await application.process_update(update)
+            
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            logger.error(f"Error processing update: {str(e)}", exc_info=True)
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    return jsonify({"status": "method not allowed"}), 405
 
 if __name__ == "__main__":
-    # Initialize the Telegram Application
-    application.run_polling(stop_signals=None)
-    # Start the Flask app
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
