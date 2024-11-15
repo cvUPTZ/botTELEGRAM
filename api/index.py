@@ -27,18 +27,37 @@ async def initialize():
     """Initialize the bot and application"""
     global application, bot
     if application is None:
-        bot = Bot(token=BOT_TOKEN)
-        application = Application.builder().token(BOT_TOKEN).build()
-        await application.initialize()
-        # Initialize the application
-        await setup_application(application)
-        logger.info("Bot initialized successfully")
+        try:
+            bot = Bot(token=BOT_TOKEN)
+            # Initialize the bot first
+            await bot.initialize()
+            
+            # Now create and initialize the application
+            application = Application.builder().token(BOT_TOKEN).build()
+            await application.initialize()
+            
+            # Set the bot instance for the application
+            application.bot = bot
+            
+            # Initialize the application handlers
+            await setup_application(application)
+            
+            logger.info("Bot and application initialized successfully")
+        except Exception as e:
+            logger.error(f"Error during initialization: {str(e)}", exc_info=True)
+            raise
 
-def async_handler(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        return asyncio.get_event_loop().run_until_complete(f(*args, **kwargs))
-    return wrapper
+def ensure_initialized():
+    """Decorator to ensure bot is initialized"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            global application, bot
+            if application is None or bot is None:
+                await initialize()
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 @app.before_serving
 async def startup():
@@ -46,19 +65,17 @@ async def startup():
     await initialize()
 
 @app.route('/', methods=['GET'])
+@ensure_initialized()
 async def home():
     """Health check endpoint"""
     return jsonify({"status": "alive", "message": "Bot is running"})
 
 @app.route('/webhook', methods=['POST'])
+@ensure_initialized()
 async def webhook():
     """Handle incoming Telegram updates"""
     if request.method == "POST":
         try:
-            # Ensure application is initialized
-            if application is None:
-                await initialize()
-            
             # Parse the update
             json_data = await request.get_json()
             update = Update.de_json(json_data, bot)
