@@ -76,7 +76,7 @@ class CVBot:
             CommandHandler("start", self.start),
             CommandHandler("question", self.ask_question),
             CommandHandler("liste_questions", self.liste_questions),
-            CommandHandler("sendcv", self.send_cv),
+            CommandHandler("sendcv", self.send_cv),  # The handler registration remains the same
             CommandHandler("myid", self.my_id),
             CommandHandler("tagall", self.tag_all),
             CommandHandler("offremploi", self.offremploi),
@@ -167,7 +167,8 @@ class CVBot:
             logger.error(f"Error listing questions: {str(e)}")
             await update.message.reply_text('❌ Une erreur est survenue lors de la récupération des questions.')
 
-    async def send_cv(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    @staticmethod
+    async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /sendcv command"""
         try:
             if not context.args or len(context.args) != 2:
