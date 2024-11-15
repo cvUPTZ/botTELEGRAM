@@ -28,18 +28,32 @@ async def initialize():
     global application, bot
     if application is None:
         try:
-            bot = Bot(token=BOT_TOKEN)
-            # Initialize the bot first
+            # Configure custom request parameters
+            request = HTTPXRequest(
+                connection_pool_size=8,
+                connect_timeout=20.0,
+                read_timeout=20.0,
+                write_timeout=20.0,
+                pool_timeout=3.0,
+            )
+
+            # Initialize bot with custom request parameters
+            bot = Bot(token=BOT_TOKEN, request=request)
             await bot.initialize()
             
-            # Now create and initialize the application
-            application = Application.builder().token(BOT_TOKEN).build()
+            # Create and initialize application with same request parameters
+            application = (
+                Application.builder()
+                .token(BOT_TOKEN)
+                .request(request)
+                .build()
+            )
             await application.initialize()
             
-            # Set the bot instance for the application
+            # Set the bot instance
             application.bot = bot
             
-            # Initialize the application handlers
+            # Initialize handlers
             await setup_application(application)
             
             logger.info("Bot and application initialized successfully")
