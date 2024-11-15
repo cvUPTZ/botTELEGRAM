@@ -4,7 +4,7 @@ import re
 from telegram import Update
 from telegram.ext import ContextTypes
 from utils.email_utils import send_email_with_cv
-from utils.db_utils import save_question
+# from utils.db_utils import save_question
 from config import ADMIN_USER_IDS
 
 logger = logging.getLogger(__name__)
@@ -23,21 +23,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Error sending start message: {str(e)}")
 
-async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /question command"""
-    if not context.args:
-        await update.message.reply_text('❗ Veuillez fournir votre question.')
-        return
+# async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+#     """Handle the /question command"""
+#     if not context.args:
+#         await update.message.reply_text('❗ Veuillez fournir votre question.')
+#         return
 
-    question_text = ' '.join(context.args)
-    user_id = update.effective_user.id
+#     question_text = ' '.join(context.args)
+#     user_id = update.effective_user.id
 
-    try:
-        await save_question(user_id, question_text)
-        await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
-    except Exception as e:
-        logger.error(f"Error saving question: {str(e)}")
-        await update.message.reply_text('❌ Une erreur est survenue lors de l\'enregistrement de votre question.')
+#     try:
+#         await save_question(user_id, question_text)
+#         await update.message.reply_text('✅ Votre question a été soumise et sera répondue par un administrateur. 🙏')
+#     except Exception as e:
+#         logger.error(f"Error saving question: {str(e)}")
+#         await update.message.reply_text('❌ Une erreur est survenue lors de l\'enregistrement de votre question.')
 
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /sendcv command"""
