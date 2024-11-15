@@ -71,51 +71,44 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # Load sent emails at the beginning of your script
 sent_emails = load_sent_emails()
 
-@private_chat_only
 async def send_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Handle the /sendcv command to send CV via email
-    
-    Arguments:
-    update -- the update object containing the update information
-    context -- the context object containing command arguments and bot instance
-    """
+    """Handle the /sendcv command"""
     try:
-        user_id = update.effective_user.id
-        
-        # Check if any arguments were provided
         if not context.args or len(context.args) != 2:
-            await send_usage_instructions(update.message)
+            await update.message.reply_text(
+                '❌ Format: /sendcv [email] [junior|senior]\n'
+                'Exemple: /sendcv email@example.com junior'
+            )
             return
 
-        # Get email and CV type from arguments
         email = context.args[0].lower()
         cv_type = context.args[1].lower()
-
-        # Validate CV type
-        if cv_type not in ['junior', 'senior']:
-            await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
-            return
 
         # Validate email format
         if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
             await update.message.reply_text('❌ Format d\'email invalide.')
             return
 
-        # Send the CV and get result - pass both email_utils function and context
+        # Validate CV type
+        if cv_type not in ['junior', 'senior']:
+            await update.message.reply_text('❌ Type de CV invalide. Utilisez "junior" ou "senior".')
+            return
+
+        user_id = update.effective_user.id
+        
+        # Send email with CV and get result
         result = await send_email_with_cv(
-            email=email, 
-            cv_type=cv_type, 
-            user_id=user_id, 
+            email=email,
+            cv_type=cv_type,
+            user_id=user_id,
             context=context
         )
         
-        # Send the result message back to the user
         await update.message.reply_text(result)
 
     except Exception as e:
-        logger.error(f"Error in send_cv handler: {str(e)}", exc_info=True)
-        await update.message.reply_text('❌ Une erreur est survenue. Veuillez réessayer plus tard.')
+        logger.error(f"Error in send_cv: {str(e)}", exc_info=True)
+        await update.message.reply_text('❌ Une erreur est survenue lors de l\'envoi du CV.')
 
 async def send_usage_instructions(message):
     """Send CV command usage instructions"""
