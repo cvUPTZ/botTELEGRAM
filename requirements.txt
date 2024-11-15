@@ -15,3 +15,4 @@ setuptools
 httpx
 motor
 python-telegram-bot[job-queue]
+mangum
